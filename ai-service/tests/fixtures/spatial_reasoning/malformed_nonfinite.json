@@ -1,0 +1,29 @@
+{
+  "description": "Malformed: NaN/Infinity appear both as literal JSON tokens and as numeric-looking strings in a spatial spec. Both forms must fail strict/allow_inf_nan=False validation; no coercion from string to float is permitted.",
+  "rawModelOutputNumericNaN": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "spatial_domain",
+    "summary": ["Move it."],
+    "geometry": {"mode": "preserve"},
+    "material": {"mode": "preserve"},
+    "spatial": {"mode": "replace", "spec": {"kind": "move_relative_to_nearest_wall", "relationship": "away_from", "distanceMeters": NaN}},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.5
+  },
+  "rawModelOutputStringInfinity": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "spatial_domain",
+    "summary": ["Move it."],
+    "geometry": {"mode": "preserve"},
+    "material": {"mode": "preserve"},
+    "spatial": {"mode": "replace", "spec": {"kind": "move_relative_to_nearest_wall", "relationship": "away_from", "distanceMeters": "Infinity"}},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.5
+  }
+}

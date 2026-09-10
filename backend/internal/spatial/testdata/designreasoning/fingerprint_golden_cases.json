@@ -1,0 +1,34 @@
+{
+  "description": "Golden fingerprint cases for computeDesignPlanFingerprint. Two plans with identical normalized content (differing only in map key order, copy fields, confidence, runtime notice text, or timestamps) must hash equal. Any change to target/revision/geometry/material/operations/fit/execution must hash different.",
+  "equalPairs": [
+    {
+      "name": "map_key_order_does_not_affect_hash",
+      "reason": "JSON object key order in the source proposedDelta must not affect the deterministic encoding used for the fingerprint."
+    },
+    {
+      "name": "confidence_change_does_not_affect_hash",
+      "reason": "confidence is excluded from the fingerprint struct by design."
+    },
+    {
+      "name": "review_notes_copy_change_does_not_affect_hash",
+      "reason": "prose-only review notes are excluded from the fingerprint struct by design."
+    },
+    {
+      "name": "runtime_notice_text_change_does_not_affect_hash",
+      "reason": "runtime notice copy is excluded from the fingerprint struct by design."
+    },
+    {
+      "name": "timestamp_change_does_not_affect_hash",
+      "reason": "createdAt/completedAt are excluded from the fingerprint struct by design."
+    }
+  ],
+  "differingPairs": [
+    {"name": "target_change_alters_hash"},
+    {"name": "revision_change_alters_hash"},
+    {"name": "geometry_change_alters_hash"},
+    {"name": "material_change_alters_hash"},
+    {"name": "resolved_operation_change_alters_hash"},
+    {"name": "fit_result_change_alters_hash"},
+    {"name": "execution_flag_change_alters_hash"}
+  ]
+}

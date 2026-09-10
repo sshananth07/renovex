@@ -1,0 +1,38 @@
+{
+  "name": "xiaomi-11t-object-loop",
+  "frames": [
+    {
+      "timestampMillis": 0,
+      "cameraPosition": {"x": 0.0, "z": 0.0},
+      "cameraHeadingRadians": 0.0,
+      "planes": [
+        {"planeId":"object-1","center":{"x":-0.53,"z":-1.115},"worldNormal":{"x":0.83205,"z":-0.55470},"worldPolygon":[{"x":-0.66868,"z":-1.32301},{"x":-0.39132,"z":-0.90699}],"trackingState":"TRACKING"},
+        {"planeId":"object-2","center":{"x":-0.385,"z":-1.29},"worldNormal":{"x":0.81518,"z":0.57920},"worldPolygon":[{"x":-0.52,"z":-1.10},{"x":-0.25,"z":-1.48}],"trackingState":"TRACKING"},
+        {"planeId":"object-3","center":{"x":-0.20,"z":-1.425},"worldNormal":{"x":0.73994,"z":-0.67267},"worldPolygon":[{"x":-0.36817,"z":-1.60999},{"x":-0.03183,"z":-1.24001}],"trackingState":"TRACKING"},
+        {"planeId":"object-4","center":{"x":-0.345,"z":-1.25},"worldNormal":{"x":0.52410,"z":0.85166},"worldPolygon":[{"x":-0.15,"z":-1.37},{"x":-0.54,"z":-1.13}],"trackingState":"TRACKING"}
+      ]
+    },
+    {
+      "timestampMillis": 300,
+      "cameraPosition": {"x": 0.10, "z": 0.0},
+      "cameraHeadingRadians": 1.5707963268,
+      "planes": [
+        {"planeId":"object-1","center":{"x":-0.53,"z":-1.115},"worldNormal":{"x":0.83205,"z":-0.55470},"worldPolygon":[{"x":-0.66868,"z":-1.32301},{"x":-0.39132,"z":-0.90699}],"trackingState":"TRACKING"},
+        {"planeId":"object-2","center":{"x":-0.385,"z":-1.29},"worldNormal":{"x":0.81518,"z":0.57920},"worldPolygon":[{"x":-0.52,"z":-1.10},{"x":-0.25,"z":-1.48}],"trackingState":"TRACKING"},
+        {"planeId":"object-3","center":{"x":-0.20,"z":-1.425},"worldNormal":{"x":0.73994,"z":-0.67267},"worldPolygon":[{"x":-0.36817,"z":-1.60999},{"x":-0.03183,"z":-1.24001}],"trackingState":"TRACKING"},
+        {"planeId":"object-4","center":{"x":-0.345,"z":-1.25},"worldNormal":{"x":0.52410,"z":0.85166},"worldPolygon":[{"x":-0.15,"z":-1.37},{"x":-0.54,"z":-1.13}],"trackingState":"TRACKING"}
+      ]
+    },
+    {
+      "timestampMillis": 600,
+      "cameraPosition": {"x": 0.0, "z": 0.10},
+      "cameraHeadingRadians": 3.1415926536,
+      "planes": [
+        {"planeId":"object-1","center":{"x":-0.53,"z":-1.115},"worldNormal":{"x":0.83205,"z":-0.55470},"worldPolygon":[{"x":-0.66868,"z":-1.32301},{"x":-0.39132,"z":-0.90699}],"trackingState":"TRACKING"},
+        {"planeId":"object-2","center":{"x":-0.385,"z":-1.29},"worldNormal":{"x":0.81518,"z":0.57920},"worldPolygon":[{"x":-0.52,"z":-1.10},{"x":-0.25,"z":-1.48}],"trackingState":"TRACKING"},
+        {"planeId":"object-3","center":{"x":-0.20,"z":-1.425},"worldNormal":{"x":0.73994,"z":-0.67267},"worldPolygon":[{"x":-0.36817,"z":-1.60999},{"x":-0.03183,"z":-1.24001}],"trackingState":"TRACKING"},
+        {"planeId":"object-4","center":{"x":-0.345,"z":-1.25},"worldNormal":{"x":0.52410,"z":0.85166},"worldPolygon":[{"x":-0.15,"z":-1.37},{"x":-0.54,"z":-1.13}],"trackingState":"TRACKING"}
+      ]
+    }
+  ]
+}

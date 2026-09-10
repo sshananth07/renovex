@@ -1,0 +1,57 @@
+{
+  "description": "Material-only refinement turn. Geometry and spatial sections preserve; only material replaces. Cumulative geometry from a prior turn remains pending generation, so hunyuanRequired must stay true at the Go layer even though this turn requires no new generation.",
+  "request": {
+    "schemaVersion": 1,
+    "turnId": "turn_002",
+    "roomDraftId": "roomdraft_001",
+    "roomDraftRevision": 17,
+    "selectedElement": {
+      "kind": "object",
+      "id": "object_sofa_123",
+      "category": "sofa",
+      "transform": {
+        "position": {"x": 1.2, "y": 0.0, "z": 2.4},
+        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}
+      },
+      "dimensions": {"x": 2.0, "y": 0.85, "z": 0.95},
+      "attachedToWallId": null,
+      "visualAssetBound": false
+    },
+    "context": {
+      "walls": [],
+      "openings": [],
+      "neighbors": []
+    },
+    "currentWorkingDesign": {
+      "geometry": {
+        "category": "sofa",
+        "shapeDescription": "Curved three-seat sofa with rounded arms",
+        "preserveCanonicalDimensions": true
+      },
+      "material": null,
+      "resolvedSpatialOperations": []
+    },
+    "lastSuccessfulPlanSummary": ["Made the sofa curved with rounded arms."],
+    "instruction": "Actually make it beige.",
+    "allowedSpatialOperations": ["move_relative_to_nearest_wall", "resize_axis"],
+    "materialFamilyEnum": ["fabric", "leather", "wood", "metal", "stone", "other"],
+    "roughnessEnum": ["matte", "satin", "glossy"],
+    "preservationDefaults": {"geometry": true, "material": true, "spatial": true}
+  },
+  "expectedProposedDelta": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "material_appearance",
+    "summary": ["Change the sofa upholstery to beige."],
+    "geometry": {"mode": "preserve"},
+    "material": {
+      "mode": "replace",
+      "spec": {"baseColor": "#c8a464", "materialFamily": "fabric", "roughness": "matte", "metallic": false}
+    },
+    "spatial": {"mode": "preserve"},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.91
+  }
+}

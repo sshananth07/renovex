@@ -1,0 +1,62 @@
+# Go
+backend/bin/
+*.exe
+*.test
+*.out
+/coverage.txt
+/coverage.html
+
+# Node
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/coverage/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/*.tsbuildinfo
+apps/web/next-env.d.ts
+
+# Python
+ai-service/.venv/
+ai-service/venv/
+ai-service/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+ai-service/.pytest_cache/
+ai-service/.ruff_cache/
+
+# Android (Gradle build output + per-machine SDK config)
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+
+# iOS (Swift Package Manager build output)
+ios/**/.build/
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/**/DerivedData/
+
+# Env
+.env
+.env.local
+
+# Local data
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Ad-hoc QA/debug scratch output (screenshots, logs from manual test runs)
+/.tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+/tasks
+
+handoff.md 
+
+/artifacts/f1v/

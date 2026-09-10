@@ -1,0 +1,52 @@
+{
+  "description": "Target resolution table cases for resolveDesignTarget — object/fixture success, wrong kind/id, cross-kind collision, missing/invalid dimensions, nonfinite transforms.",
+  "cases": [
+    {
+      "name": "valid_object_sofa",
+      "targetKind": "object",
+      "targetId": "object_sofa_123",
+      "expectSuccess": true
+    },
+    {
+      "name": "valid_fixture_ac",
+      "targetKind": "fixture",
+      "targetId": "fixture_ac_001",
+      "expectSuccess": true
+    },
+    {
+      "name": "wrong_kind_wall_rejected",
+      "targetKind": "wall",
+      "targetId": "wall_1",
+      "expectSuccess": false,
+      "expectError": "unsupported_target_kind"
+    },
+    {
+      "name": "unknown_id_not_found",
+      "targetKind": "object",
+      "targetId": "object_does_not_exist",
+      "expectSuccess": false,
+      "expectError": "target_not_found"
+    },
+    {
+      "name": "cross_kind_id_collision",
+      "targetKind": "fixture",
+      "targetId": "object_sofa_123",
+      "expectSuccess": false,
+      "expectError": "target_not_found"
+    },
+    {
+      "name": "missing_dimensions_blocks_spatial_only",
+      "targetKind": "object",
+      "targetId": "object_no_dimensions",
+      "expectSuccess": true,
+      "expectDimensionsPresent": false
+    },
+    {
+      "name": "nonfinite_transform_rejected",
+      "targetKind": "object",
+      "targetId": "object_nonfinite_transform",
+      "expectSuccess": false,
+      "expectError": "invalid_transform"
+    }
+  ]
+}

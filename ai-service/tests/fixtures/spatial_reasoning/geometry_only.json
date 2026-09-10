@@ -1,0 +1,53 @@
+{
+  "description": "Geometry-only turn on the first turn of a session (no prior working design). Material and spatial preserve.",
+  "request": {
+    "schemaVersion": 1,
+    "turnId": "turn_001",
+    "roomDraftId": "roomdraft_001",
+    "roomDraftRevision": 17,
+    "selectedElement": {
+      "kind": "object",
+      "id": "object_sofa_123",
+      "category": "sofa",
+      "transform": {
+        "position": {"x": 1.2, "y": 0.0, "z": 2.4},
+        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}
+      },
+      "dimensions": {"x": 2.0, "y": 0.85, "z": 0.95},
+      "attachedToWallId": null,
+      "visualAssetBound": false
+    },
+    "context": {
+      "walls": [],
+      "openings": [],
+      "neighbors": []
+    },
+    "currentWorkingDesign": {
+      "geometry": null,
+      "material": null,
+      "resolvedSpatialOperations": []
+    },
+    "lastSuccessfulPlanSummary": [],
+    "instruction": "Make this sofa curved with rounded arms.",
+    "allowedSpatialOperations": ["move_relative_to_nearest_wall", "resize_axis"],
+    "materialFamilyEnum": ["fabric", "leather", "wood", "metal", "stone", "other"],
+    "roughnessEnum": ["matte", "satin", "glossy"],
+    "preservationDefaults": {"geometry": true, "material": true, "spatial": true}
+  },
+  "expectedProposedDelta": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "visual_geometry",
+    "summary": ["Change the sofa shape to a curved design with rounded arms."],
+    "geometry": {
+      "mode": "replace",
+      "spec": {"category": "sofa", "shapeDescription": "Curved three-seat sofa with rounded arms", "preserveCanonicalDimensions": true}
+    },
+    "material": {"mode": "preserve"},
+    "spatial": {"mode": "preserve"},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.88
+  }
+}

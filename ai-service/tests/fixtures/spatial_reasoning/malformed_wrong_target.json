@@ -1,0 +1,17 @@
+{
+  "description": "Malformed: model echoes back a different target ID than the one selected. Go must reject this as design_plan_target_mismatch (502).",
+  "requestedTarget": {"kind": "object", "id": "object_sofa_123"},
+  "rawModelOutput": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_chair_999"},
+    "intent": "material_appearance",
+    "summary": ["Change the chair upholstery to beige."],
+    "geometry": {"mode": "preserve"},
+    "material": {"mode": "replace", "spec": {"baseColor": "beige", "materialFamily": "fabric", "roughness": "matte", "metallic": false}},
+    "spatial": {"mode": "preserve"},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.91
+  }
+}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only cleartext allowlist for the local dev backend. Production
+  builds carry no such config and cleartext stays blocked everywhere
+  (Android's default since API 28) — this file lives under src/debug so it
+  is never packaged into a release build.
+-->
+<network-security-config>
+    <!--
+      Pinning one dev-machine LAN IP breaks every time DHCP reassigns it
+      (already happened once: 192.168.1.14 -> .15). network-security-config
+      has no CIDR/subnet syntax, so the base-config (applies to every
+      cleartext destination, not a domain allowlist) is used instead —
+      acceptable ONLY because this file lives under src/debug and is never
+      packaged into a release build, where cleartext stays blocked by
+      Android's default (API 28+).
+    -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

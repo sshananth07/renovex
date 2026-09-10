@@ -1,0 +1,38 @@
+{
+  "name": "simple-rectangular-room",
+  "frames": [
+    {
+      "timestampMillis": 0,
+      "cameraPosition": {"x": 2.0, "z": 1.5},
+      "cameraHeadingRadians": 0.0,
+      "planes": [
+        {"planeId":"south","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+        {"planeId":"east","center":{"x":4.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":4.0,"z":0.0},{"x":4.0,"z":3.0}],"trackingState":"TRACKING"},
+        {"planeId":"north","center":{"x":2.0,"z":3.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":4.0,"z":3.0},{"x":0.0,"z":3.0}],"trackingState":"TRACKING"},
+        {"planeId":"west","center":{"x":0.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":3.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+      ]
+    },
+    {
+      "timestampMillis": 300,
+      "cameraPosition": {"x":2.1,"z":1.5},
+      "cameraHeadingRadians": 1.5707963268,
+      "planes": [
+        {"planeId":"south","center":{"x":2.0,"z":0.01},"worldNormal":{"x":0.002,"z":0.999998},"worldPolygon":[{"x":0.0,"z":0.01},{"x":4.0,"z":-0.01}],"trackingState":"TRACKING"},
+        {"planeId":"east","center":{"x":4.01,"z":1.5},"worldNormal":{"x":0.999998,"z":-0.002},"worldPolygon":[{"x":4.01,"z":0.0},{"x":3.99,"z":3.0}],"trackingState":"TRACKING"},
+        {"planeId":"north","center":{"x":2.0,"z":2.99},"worldNormal":{"x":0.002,"z":0.999998},"worldPolygon":[{"x":4.0,"z":2.99},{"x":0.0,"z":3.01}],"trackingState":"TRACKING"},
+        {"planeId":"west","center":{"x":0.01,"z":1.5},"worldNormal":{"x":0.999998,"z":0.002},"worldPolygon":[{"x":0.01,"z":3.0},{"x":-0.01,"z":0.0}],"trackingState":"TRACKING"}
+      ]
+    },
+    {
+      "timestampMillis": 600,
+      "cameraPosition": {"x":2.0,"z":1.4},
+      "cameraHeadingRadians": 3.1415926536,
+      "planes": [
+        {"planeId":"south","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+        {"planeId":"east","center":{"x":4.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":4.0,"z":0.0},{"x":4.0,"z":3.0}],"trackingState":"TRACKING"},
+        {"planeId":"north","center":{"x":2.0,"z":3.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":4.0,"z":3.0},{"x":0.0,"z":3.0}],"trackingState":"TRACKING"},
+        {"planeId":"west","center":{"x":0.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":3.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+      ]
+    }
+  ]
+}

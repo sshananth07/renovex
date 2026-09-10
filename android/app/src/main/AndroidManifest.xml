@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Camera-backed Scan Mode is optional at whole-app install time, like ARCore below. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!--
+      required="false": ARCore/Depth is used "where supported" (design spec
+      Task 5), not a whole-app requirement — a device without AR support
+      can still use the rest of Renovex Capture (project/space browsing,
+      AR Review of an already-confirmed room via 2D/3D fallback, etc.).
+      Google Play still filters ARCore-incompatible devices out of search
+      results for apps that declare "AR Required", which this deliberately
+      avoids.
+    -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
+
+    <application
+        android:name=".RenovexCaptureApp"
+        android:allowBackup="false"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!--
+          "optional": ARCore Services installs/updates itself opportunistically
+          rather than blocking app install on devices without it — matching
+          uses-feature required="false" above.
+        -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

@@ -1,0 +1,17 @@
+{
+  "name":"open-doorway",
+  "frames":[
+    {"timestampMillis":0,"cameraPosition":{"x":2.0,"z":1.0},"cameraHeadingRadians":-1.5707963268,"planes":[
+      {"planeId":"door-left","center":{"x":0.75,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":1.5,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"door-right","center":{"x":3.25,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":2.5,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":300,"cameraPosition":{"x":2.0,"z":0.8},"cameraHeadingRadians":-1.5707963268,"planes":[
+      {"planeId":"door-left","center":{"x":0.75,"z":0.01},"worldNormal":{"x":0.001,"z":0.999999},"worldPolygon":[{"x":0.0,"z":0.01},{"x":1.5,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"door-right","center":{"x":3.25,"z":-0.01},"worldNormal":{"x":-0.001,"z":-0.999999},"worldPolygon":[{"x":2.5,"z":0.0},{"x":4.0,"z":-0.01}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":600,"cameraPosition":{"x":2.0,"z":0.7},"cameraHeadingRadians":-1.5707963268,"planes":[
+      {"planeId":"door-left","center":{"x":0.75,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":1.5,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"door-right","center":{"x":3.25,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":2.5,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]}
+  ]
+}

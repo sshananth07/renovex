@@ -1,0 +1,16 @@
+{
+  "description": "Malformed: model emits a spatial operation kind outside the closed discriminated union RP4E1 supports (only move_relative_to_nearest_wall and resize_axis are valid). Must fail schema validation.",
+  "rawModelOutput": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "spatial_domain",
+    "summary": ["Rotate it 90 degrees."],
+    "geometry": {"mode": "preserve"},
+    "material": {"mode": "preserve"},
+    "spatial": {"mode": "replace", "spec": {"kind": "rotate_object", "degrees": 90}},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.5
+  }
+}

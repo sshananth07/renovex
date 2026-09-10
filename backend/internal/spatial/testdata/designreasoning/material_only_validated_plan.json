@@ -1,0 +1,37 @@
+{
+  "description": "Go-side counterpart to ai-service/tests/fixtures/spatial_reasoning/material_only.json. Used by Go tests to prove mergeWorkingDesign/resolveSpatialChanges/fingerprint agree on the same wire contract Python validated independently.",
+  "target": {"kind": "object", "id": "object_sofa_123"},
+  "basedOnRoomDraftRevision": 17,
+  "previousWorkingDesign": {
+    "geometry": {"category": "sofa", "shapeDescription": "Curved three-seat sofa with rounded arms", "preserveCanonicalDimensions": true},
+    "material": null,
+    "resolvedSpatialOperations": []
+  },
+  "proposedDelta": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "material_appearance",
+    "summary": ["Change the sofa upholstery to beige."],
+    "geometry": {"mode": "preserve"},
+    "material": {
+      "mode": "replace",
+      "spec": {"baseColor": "#c8a464", "materialFamily": "fabric", "roughness": "matte", "metallic": false}
+    },
+    "spatial": {"mode": "preserve"},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.91
+  },
+  "expectedMergedWorkingDesign": {
+    "geometry": {"category": "sofa", "shapeDescription": "Curved three-seat sofa with rounded arms", "preserveCanonicalDimensions": true},
+    "material": {"baseColor": "#c8a464", "materialFamily": "fabric", "roughness": "matte", "metallic": false},
+    "resolvedSpatialOperations": []
+  },
+  "expectedExecution": {
+    "turnRequiresAssetGeneration": false,
+    "hunyuanRequired": true,
+    "requiresConfirmation": true,
+    "executable": true
+  }
+}

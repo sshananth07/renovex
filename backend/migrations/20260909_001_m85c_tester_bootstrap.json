@@ -1,0 +1,32 @@
+{
+  "migrationId": "20260909_001_m85c_tester_bootstrap",
+  "description": "M8.5C RP4E2/RP4E3/deployment tester bootstrap: adds spatial_design_generation_attempts and spatial_design_acceptances to the collection manifest, plus the schema_migrations ledger collection itself. No business or demo documents are inserted by this migration.",
+  "applicationVersion": "m85c-rp4e2-rp4e3",
+  "collectionCount": 63,
+  "newCollectionsSincePreviousManifest": [
+    "spatial_design_generation_attempts",
+    "spatial_design_acceptances",
+    "schema_migrations"
+  ],
+  "newIndexes": {
+    "spatial_design_generation_attempts": [
+      "uq_spatial_design_generation_attempts_company_session_client_request_id",
+      "uq_spatial_design_generation_attempts_company_turn_attempt_number",
+      "uq_spatial_design_generation_attempts_company_turn_active_slot",
+      "idx_spatial_design_generation_attempts_company_session_created",
+      "idx_spatial_design_generation_attempts_company_job"
+    ],
+    "spatial_design_acceptances": [
+      "uq_spatial_design_acceptances_company_session_client_request_id",
+      "uq_spatial_design_acceptances_company_attempt",
+      "idx_spatial_design_acceptances_company_roomdraft_created"
+    ]
+  },
+  "seedDocuments": [],
+  "notes": [
+    "This file is the checked-in, human-reviewable declaration of what backend/cmd/dbbootstrap's `apply` subcommand is expected to produce.",
+    "The actual applied/verified record lives in MongoDB's schema_migrations collection (one document per applied migration, keyed by migrationId, carrying a SHA-256 checksum of the sorted collection manifest at apply time) — this file is not read by dbbootstrap at runtime; the authoritative manifest is backend/internal/platform/mongo/schema_manifest.go's CollectionManifest.",
+    "The full 63-collection manifest (all Milestones 1-8 plus every M8.5C spatial collection) is not repeated here to avoid a second, driftable copy — see schema_manifest.go and its schema_manifest_test.go drift guard.",
+    "validators: {} — no Mongo JSON Schema validators are defined by this or any prior migration; validation remains Go-side only, matching the existing repository convention. This is a deliberate, recorded state, not an oversight."
+  ]
+}

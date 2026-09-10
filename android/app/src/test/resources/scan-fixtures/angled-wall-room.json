@@ -1,0 +1,23 @@
+{
+  "name":"angled-wall-room",
+  "frames":[
+    {"timestampMillis":0,"cameraPosition":{"x":2.0,"z":1.5},"cameraHeadingRadians":0.0,"planes":[
+      {"planeId":"a1","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"a2","center":{"x":4.5,"z":1.5},"worldNormal":{"x":0.948683,"z":-0.316228},"worldPolygon":[{"x":4.0,"z":0.0},{"x":5.0,"z":3.0}],"trackingState":"TRACKING"},
+      {"planeId":"a3","center":{"x":2.5,"z":3.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":5.0,"z":3.0},{"x":0.0,"z":3.0}],"trackingState":"TRACKING"},
+      {"planeId":"a4","center":{"x":0.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":3.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":300,"cameraPosition":{"x":2.2,"z":1.4},"cameraHeadingRadians":1.5707963268,"planes":[
+      {"planeId":"a1","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"a2","center":{"x":4.5,"z":1.5},"worldNormal":{"x":0.948683,"z":-0.316228},"worldPolygon":[{"x":4.0,"z":0.0},{"x":5.0,"z":3.0}],"trackingState":"TRACKING"},
+      {"planeId":"a3","center":{"x":2.5,"z":3.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":5.0,"z":3.0},{"x":0.0,"z":3.0}],"trackingState":"TRACKING"},
+      {"planeId":"a4","center":{"x":0.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":3.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":600,"cameraPosition":{"x":2.0,"z":1.6},"cameraHeadingRadians":3.1415926536,"planes":[
+      {"planeId":"a1","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"a2","center":{"x":4.5,"z":1.5},"worldNormal":{"x":0.948683,"z":-0.316228},"worldPolygon":[{"x":4.0,"z":0.0},{"x":5.0,"z":3.0}],"trackingState":"TRACKING"},
+      {"planeId":"a3","center":{"x":2.5,"z":3.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":5.0,"z":3.0},{"x":0.0,"z":3.0}],"trackingState":"TRACKING"},
+      {"planeId":"a4","center":{"x":0.0,"z":1.5},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":3.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]}
+  ]
+}

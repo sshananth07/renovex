@@ -1,0 +1,39 @@
+?   	github.com/shananth/renovation-platform/backend/cmd/api	[no test files]
+ok  	github.com/shananth/renovation-platform/backend/internal/access	62.148s
+?   	github.com/shananth/renovation-platform/backend/internal/ai	[no test files]
+ok  	github.com/shananth/renovation-platform/backend/internal/approvals	10.962s
+ok  	github.com/shananth/renovation-platform/backend/internal/audit	7.157s
+?   	github.com/shananth/renovation-platform/backend/internal/awards	[no test files]
+ok  	github.com/shananth/renovation-platform/backend/internal/clients	8.826s
+ok  	github.com/shananth/renovation-platform/backend/internal/companies	9.975s
+ok  	github.com/shananth/renovation-platform/backend/internal/costs	15.593s
+?   	github.com/shananth/renovation-platform/backend/internal/documents	[no test files]
+ok  	github.com/shananth/renovation-platform/backend/internal/estimates	18.401s
+ok  	github.com/shananth/renovation-platform/backend/internal/foundation/money	0.757s
+ok  	github.com/shananth/renovation-platform/backend/internal/foundation/quantity	0.765s
+ok  	github.com/shananth/renovation-platform/backend/internal/identity	15.529s
+ok  	github.com/shananth/renovation-platform/backend/internal/labour	14.486s
+ok  	github.com/shananth/renovation-platform/backend/internal/materialrequirements	46.603s
+ok  	github.com/shananth/renovation-platform/backend/internal/materials	8.370s
+?   	github.com/shananth/renovation-platform/backend/internal/payments	[no test files]
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/ai	0.708s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/composition	3.628s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/config	0.728s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/http	5.371s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/jobs	0.786s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/logging	0.919s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/mail	1.140s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/mongo	5.316s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/secrets	0.726s
+ok  	github.com/shananth/renovation-platform/backend/internal/platform/storage	0.733s
+ok  	github.com/shananth/renovation-platform/backend/internal/projects	7.379s
+ok  	github.com/shananth/renovation-platform/backend/internal/properties	9.190s
+ok  	github.com/shananth/renovation-platform/backend/internal/quotations	13.992s
+ok  	github.com/shananth/renovation-platform/backend/internal/rfqissuance	34.485s
+ok  	github.com/shananth/renovation-platform/backend/internal/rfqs	25.695s
+ok  	github.com/shananth/renovation-platform/backend/internal/spaces	8.756s
+?   	github.com/shananth/renovation-platform/backend/internal/supplieraccess	[no test files]
+?   	github.com/shananth/renovation-platform/backend/internal/supplieroffers	[no test files]
+ok  	github.com/shananth/renovation-platform/backend/internal/suppliers	33.858s
+ok  	github.com/shananth/renovation-platform/backend/internal/tenanttest	160.854s
+ok  	github.com/shananth/renovation-platform/backend/internal/work	9.192s

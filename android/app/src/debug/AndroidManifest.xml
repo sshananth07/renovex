@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-variant manifest merge: adds networkSecurityConfig pointing at the
+  debug-only cleartext allowlist (src/debug/res/xml/network_security_config.xml)
+  so the app can reach the local Go dev backend over plain HTTP. Merged only
+  into debug builds — release carries no such override.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:networkSecurityConfig="@xml/network_security_config">
+        <activity
+            android:name=".RoomReviewTestHostActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    </application>
+</manifest>

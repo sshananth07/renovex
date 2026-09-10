@@ -1,0 +1,55 @@
+{
+  "description": "Spatial-only turn: move relative to nearest wall. Geometry/material preserve.",
+  "request": {
+    "schemaVersion": 1,
+    "turnId": "turn_003",
+    "roomDraftId": "roomdraft_001",
+    "roomDraftRevision": 17,
+    "selectedElement": {
+      "kind": "object",
+      "id": "object_sofa_123",
+      "category": "sofa",
+      "transform": {
+        "position": {"x": 1.2, "y": 0.0, "z": 2.4},
+        "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}
+      },
+      "dimensions": {"x": 2.0, "y": 0.85, "z": 0.95},
+      "attachedToWallId": null,
+      "visualAssetBound": false
+    },
+    "context": {
+      "walls": [
+        {"id": "wall_1", "start": {"x": 0, "y": 0, "z": 0}, "end": {"x": 4, "y": 0, "z": 0}, "thickness": 0.15}
+      ],
+      "openings": [],
+      "neighbors": []
+    },
+    "currentWorkingDesign": {
+      "geometry": null,
+      "material": null,
+      "resolvedSpatialOperations": []
+    },
+    "lastSuccessfulPlanSummary": [],
+    "instruction": "Move it 20 cm away from the wall.",
+    "allowedSpatialOperations": ["move_relative_to_nearest_wall", "resize_axis"],
+    "materialFamilyEnum": ["fabric", "leather", "wood", "metal", "stone", "other"],
+    "roughnessEnum": ["matte", "satin", "glossy"],
+    "preservationDefaults": {"geometry": true, "material": true, "spatial": true}
+  },
+  "expectedProposedDelta": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "spatial_domain",
+    "summary": ["Move the sofa 20 cm away from the nearest wall."],
+    "geometry": {"mode": "preserve"},
+    "material": {"mode": "preserve"},
+    "spatial": {
+      "mode": "replace",
+      "spec": {"kind": "move_relative_to_nearest_wall", "relationship": "away_from", "distanceMeters": 0.2}
+    },
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.86
+  }
+}

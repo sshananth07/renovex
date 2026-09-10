@@ -1,0 +1,11 @@
+{
+  "name":"plane-subsumption",
+  "frames":[
+    {"timestampMillis":0,"cameraPosition":{"x":2.0,"z":1.0},"cameraHeadingRadians":-1.5707963268,"planes":[{"planeId":"plane-child","center":{"x":1.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":2.0,"z":0.0}],"trackingState":"TRACKING"}]},
+    {"timestampMillis":300,"cameraPosition":{"x":2.0,"z":0.9},"cameraHeadingRadians":-1.5707963268,"planes":[
+      {"planeId":"plane-child","subsumedByPlaneId":"plane-parent","center":{"x":1.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":2.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"plane-parent","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":600,"cameraPosition":{"x":2.0,"z":0.8},"cameraHeadingRadians":-1.5707963268,"planes":[{"planeId":"plane-parent","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"}]}
+  ]
+}

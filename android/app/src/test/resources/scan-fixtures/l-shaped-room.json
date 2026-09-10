@@ -1,0 +1,29 @@
+{
+  "name":"l-shaped-room",
+  "frames":[
+    {"timestampMillis":0,"cameraPosition":{"x":1.0,"z":1.0},"cameraHeadingRadians":0.0,"planes":[
+      {"planeId":"l1","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"l2","center":{"x":4.0,"z":1.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":4.0,"z":0.0},{"x":4.0,"z":2.0}],"trackingState":"TRACKING"},
+      {"planeId":"l3","center":{"x":3.0,"z":2.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":4.0,"z":2.0},{"x":2.0,"z":2.0}],"trackingState":"TRACKING"},
+      {"planeId":"l4","center":{"x":2.0,"z":3.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":2.0,"z":2.0},{"x":2.0,"z":4.0}],"trackingState":"TRACKING"},
+      {"planeId":"l5","center":{"x":1.0,"z":4.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":2.0,"z":4.0},{"x":0.0,"z":4.0}],"trackingState":"TRACKING"},
+      {"planeId":"l6","center":{"x":0.0,"z":2.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":4.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":300,"cameraPosition":{"x":1.2,"z":1.2},"cameraHeadingRadians":1.5707963268,"planes":[
+      {"planeId":"l1","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"l2","center":{"x":4.0,"z":1.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":4.0,"z":0.0},{"x":4.0,"z":2.0}],"trackingState":"TRACKING"},
+      {"planeId":"l3","center":{"x":3.0,"z":2.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":4.0,"z":2.0},{"x":2.0,"z":2.0}],"trackingState":"TRACKING"},
+      {"planeId":"l4","center":{"x":2.0,"z":3.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":2.0,"z":2.0},{"x":2.0,"z":4.0}],"trackingState":"TRACKING"},
+      {"planeId":"l5","center":{"x":1.0,"z":4.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":2.0,"z":4.0},{"x":0.0,"z":4.0}],"trackingState":"TRACKING"},
+      {"planeId":"l6","center":{"x":0.0,"z":2.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":4.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]},
+    {"timestampMillis":600,"cameraPosition":{"x":1.0,"z":2.0},"cameraHeadingRadians":3.1415926536,"planes":[
+      {"planeId":"l1","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"},
+      {"planeId":"l2","center":{"x":4.0,"z":1.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":4.0,"z":0.0},{"x":4.0,"z":2.0}],"trackingState":"TRACKING"},
+      {"planeId":"l3","center":{"x":3.0,"z":2.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":4.0,"z":2.0},{"x":2.0,"z":2.0}],"trackingState":"TRACKING"},
+      {"planeId":"l4","center":{"x":2.0,"z":3.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":2.0,"z":2.0},{"x":2.0,"z":4.0}],"trackingState":"TRACKING"},
+      {"planeId":"l5","center":{"x":1.0,"z":4.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":2.0,"z":4.0},{"x":0.0,"z":4.0}],"trackingState":"TRACKING"},
+      {"planeId":"l6","center":{"x":0.0,"z":2.0},"worldNormal":{"x":1.0,"z":0.0},"worldPolygon":[{"x":0.0,"z":4.0},{"x":0.0,"z":0.0}],"trackingState":"TRACKING"}
+    ]}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Malformed: proposed delta contains an unknown extra field. Must be rejected by extra=forbid strict validation.",
+  "rawModelOutput": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "material_appearance",
+    "summary": ["Change the sofa upholstery to beige."],
+    "geometry": {"mode": "preserve"},
+    "material": {"mode": "replace", "spec": {"baseColor": "beige", "materialFamily": "fabric", "roughness": "matte", "metallic": false}},
+    "spatial": {"mode": "preserve"},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.91,
+    "unexpectedField": "should cause validation failure"
+  }
+}

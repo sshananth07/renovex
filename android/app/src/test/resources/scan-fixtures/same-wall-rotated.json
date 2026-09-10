@@ -1,0 +1,8 @@
+{
+  "name":"same-wall-rotated",
+  "frames":[
+    {"timestampMillis":0,"cameraPosition":{"x":2.0,"z":1.0},"cameraHeadingRadians":-1.5707963268,"planes":[{"planeId":"wall","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.0,"z":1.0},"worldPolygon":[{"x":0.0,"z":0.0},{"x":4.0,"z":0.0}],"trackingState":"TRACKING"}]},
+    {"timestampMillis":300,"cameraPosition":{"x":2.1,"z":1.0},"cameraHeadingRadians":-1.5707963268,"planes":[{"planeId":"wall","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.052336,"z":0.998630},"worldPolygon":[{"x":0.0,"z":-0.10},{"x":4.0,"z":0.10}],"trackingState":"TRACKING"}]},
+    {"timestampMillis":600,"cameraPosition":{"x":1.9,"z":1.0},"cameraHeadingRadians":-1.5707963268,"planes":[{"planeId":"wall","center":{"x":2.0,"z":0.0},"worldNormal":{"x":0.034899,"z":0.999391},"worldPolygon":[{"x":0.0,"z":-0.07},{"x":4.0,"z":0.07}],"trackingState":"TRACKING"}]}
+  ]
+}

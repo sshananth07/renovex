@@ -1,0 +1,16 @@
+{
+  "description": "Malformed: geometry.mode is 'replace' but no spec is provided. Mode/spec consistency is a model_validator invariant: replace REQUIRES a spec; preserve/clear MUST NOT carry one.",
+  "rawModelOutput": {
+    "schemaVersion": 1,
+    "target": {"kind": "object", "id": "object_sofa_123"},
+    "intent": "visual_geometry",
+    "summary": ["Change the shape."],
+    "geometry": {"mode": "replace"},
+    "material": {"mode": "preserve"},
+    "spatial": {"mode": "preserve"},
+    "blockers": [],
+    "assumptions": [],
+    "reviewNotes": [],
+    "confidence": 0.5
+  }
+}
