@@ -208,6 +208,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/registration-verification/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send (or resend) a registration email verification code */
+        post: operations["auth-registration-verification-send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/registration-verification/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify a registration email verification code */
+        post: operations["auth-registration-verification-verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/client/quotations/{token}": {
         parameters: {
             query?: never;
@@ -5927,6 +5961,26 @@ export interface components {
             rfqTitle?: string;
             supplierName?: string;
         };
+        SendRegistrationVerificationInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SendRegistrationVerificationInputBody.json
+             */
+            readonly $schema?: string;
+            /** Format: email */
+            email: string;
+        };
+        SendRegistrationVerificationOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SendRegistrationVerificationOutputBody.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
         SendResultOutputBody: {
             /**
              * Format: uri
@@ -6691,6 +6745,17 @@ export interface components {
             code: string;
             operationId: string;
         };
+        VerifyRegistrationCodeInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/VerifyRegistrationCodeInputBody.json
+             */
+            readonly $schema?: string;
+            code: string;
+            /** Format: email */
+            email: string;
+        };
         VisualAppearance: {
             baseColor: string;
             materialFamily: string;
@@ -7205,6 +7270,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AuthOutputBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "auth-registration-verification-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendRegistrationVerificationInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendRegistrationVerificationOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "auth-registration-verification-verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyRegistrationCodeInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {
