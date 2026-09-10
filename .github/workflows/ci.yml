@@ -1,0 +1,190 @@
+name: CI
+
+# T3A: smallest maintainable CI gate before Vercel is connected. Every job
+# reuses the exact commands a developer already runs locally (see CLAUDE.md
+# and each package's own package.json/pyproject.toml) — no new build
+# framework, no live external AI/email provider calls. The Go job's tests
+# use real ephemeral local Mongo (testcontainers, via GitHub Actions' own
+# pre-installed Docker) and a Mailpit service container — both are local
+# infrastructure this repo's own docker-compose.yml already uses for dev,
+# never a real external provider.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go backend
+    runs-on: ubuntu-latest
+    # Mailpit backs internal/tenanttest's default SMTP sender (matches
+    # docker-compose.yml's own mailpit service exactly) — without it,
+    # every test exercising RFQ-invitation/company-invite email delivery
+    # fails on "connection refused" rather than a real assertion failure.
+    services:
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        # testcontainers-go needs a Docker socket, which ubuntu-latest
+        # provides out of the box — every Mongo-backed test in this repo
+        # already spins up its own real, ephemeral mongo:7 container this
+        # way (see internal/platform/mongo's shared test helper); nothing
+        # here reaches outside the GitHub Actions runner.
+        run: go test ./...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: unit tests
+        # vitest run, not playwright — playwright/e2e stays a separate,
+        # not-yet-added concern per this task's own scope (no huge slow
+        # regression requirement for an already-expensive suite).
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+  python:
+    name: Python AI service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-service/pyproject.toml
+
+      - name: install
+        run: pip install -e ".[dev]"
+
+      - name: ruff
+        run: ruff check app tests
+
+      - name: pytest
+        # AI_PROVIDER/SPATIAL_AI_PROVIDER/REFERENCE_IMAGE_PROVIDER all
+        # default to "mock" (see app/config.py) — no real Gemini/GLM/
+        # Cloudflare credential is read or required. The 3 real-Gemini
+        # smoke tests self-skip via skipif when GEMINI_API_KEY is unset,
+        # which it deliberately is not set here.
+        run: pytest -q
+        env:
+          INTERNAL_API_TOKEN: ci-placeholder-token
+
+  contracts:
+    name: OpenAPI/Web client freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: npm ci
+        working-directory: apps/web
+        run: npm ci
+
+      - name: regenerate OpenAPI from the current Go handlers
+        working-directory: backend
+        run: go run ./cmd/openapi -out ../apps/web/openapi/openapi.json
+
+      - name: regenerate the Web TypeScript client from that OpenAPI doc
+        working-directory: apps/web
+        run: npm run openapi:generate
+
+      - name: fail if regeneration produced any diff
+        # The committed openapi.json/schema.ts must already be exactly what
+        # today's Go handlers + the existing generation commands produce —
+        # if regenerating changes anything, the committed files are stale
+        # and were not regenerated before commit (see this task's own T3A
+        # requirement).
+        run: |
+          if ! git diff --quiet -- apps/web/openapi/openapi.json apps/web/src/lib/api/generated/schema.ts; then
+            echo "::error::Generated OpenAPI/Web client files are stale. Run 'go run ./cmd/openapi -out ../apps/web/openapi/openapi.json' (from backend/) then 'npm run openapi:generate' (from apps/web/) and commit the result."
+            git diff -- apps/web/openapi/openapi.json apps/web/src/lib/api/generated/schema.ts
+            exit 1
+          fi
+
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: no tracked real env files
+        # .env.example files are expected and fine; a real .env/.env.local
+        # (or any .env.*.local) must never be committed. This is a static
+        # check of what's actually tracked in the checkout, not a secret
+        # scanner — it complements, not replaces, .gitignore.
+        run: |
+          matches=$(git ls-files | grep -E '(^|/)\.env(\.[^.]+)?$' | grep -v '\.env\.example$' || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Tracked real env file(s) found — these must never be committed:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "no tracked .env files besides .env.example"
+
+      - name: no tracked build/cache artifacts
+        run: |
+          matches=$(git ls-files | grep -E '(^|/)(__pycache__|\.venv|node_modules|\.next|\.pytest_cache|\.ruff_cache|egg-info)(/|$)|\.pyc$' || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Tracked build/cache artifact(s) found — add to .gitignore and untrack:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "no tracked build/cache artifacts"
