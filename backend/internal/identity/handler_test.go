@@ -26,10 +26,15 @@ func testAllowedOrigins(t *testing.T) config.AllowedOrigins {
 
 func newHandlerTestRouter(t *testing.T, secureRefreshCookie bool) http.Handler {
 	t.Helper()
-	return newHandlerTestRouterWithOrigins(t, secureRefreshCookie, testAllowedOrigins(t))
+	return newHandlerTestRouterWithOriginsAndSameSite(t, secureRefreshCookie, http.SameSiteLaxMode, testAllowedOrigins(t))
 }
 
 func newHandlerTestRouterWithOrigins(t *testing.T, secureRefreshCookie bool, origins config.AllowedOrigins) http.Handler {
+	t.Helper()
+	return newHandlerTestRouterWithOriginsAndSameSite(t, secureRefreshCookie, http.SameSiteLaxMode, origins)
+}
+
+func newHandlerTestRouterWithOriginsAndSameSite(t *testing.T, secureRefreshCookie bool, refreshCookieSameSite http.SameSite, origins config.AllowedOrigins) http.Handler {
 	t.Helper()
 	companyProv := newFakeCompanyProvisioner()
 	authSvc := NewAuthService(
@@ -41,7 +46,7 @@ func newHandlerTestRouterWithOrigins(t *testing.T, secureRefreshCookie bool, ori
 		testRefreshCookieMaxAge*time.Second,
 	)
 	router, api := platformhttp.NewRouter("identity-handler-test", "0.0.0")
-	RegisterHandlers(api, authSvc, testRefreshCookieMaxAge, secureRefreshCookie, origins)
+	RegisterHandlers(api, authSvc, testRefreshCookieMaxAge, secureRefreshCookie, refreshCookieSameSite, origins)
 	return router
 }
 
@@ -55,6 +60,11 @@ func registerAndGetRefreshCookie(t *testing.T, router http.Handler, email string
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
+	return refreshCookieFromResponse(t, response)
+}
+
+func refreshCookieFromResponse(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
 	for _, c := range response.Result().Cookies() {
 		if c.Name == refreshCookieName {
 			return c
@@ -62,6 +72,36 @@ func registerAndGetRefreshCookie(t *testing.T, router http.Handler, email string
 	}
 	t.Fatalf("no refresh_token cookie in response (status %d, body %s)", response.Code, response.Body.String())
 	return nil
+}
+
+func loginAndGetRefreshCookie(t *testing.T, router http.Handler, email string) *http.Cookie {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]string{"email": email, "password": "password123"})
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(raw))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("login status = %d, body %s", response.Code, response.Body.String())
+	}
+	return refreshCookieFromResponse(t, response)
+}
+
+func assertRefreshCookieAttributes(t *testing.T, cookie *http.Cookie, expired bool) {
+	t.Helper()
+	if cookie.Name != refreshCookieName || cookie.Path != "/auth" || !cookie.HttpOnly ||
+		!cookie.Secure || cookie.SameSite != http.SameSiteNoneMode {
+		t.Fatalf("unexpected refresh cookie attributes: %#v", cookie)
+	}
+	if expired {
+		if cookie.MaxAge >= 0 {
+			t.Fatalf("expired refresh cookie MaxAge = %d, want a negative value", cookie.MaxAge)
+		}
+		return
+	}
+	if cookie.MaxAge != testRefreshCookieMaxAge {
+		t.Fatalf("refresh cookie MaxAge = %d, want %d", cookie.MaxAge, testRefreshCookieMaxAge)
+	}
 }
 
 func TestRefreshCookieAttributesInDevelopment(t *testing.T) {
@@ -92,20 +132,42 @@ func TestRefreshCookieAttributesInDevelopment(t *testing.T) {
 }
 
 func TestRefreshCookieAttributesInProduction(t *testing.T) {
-	router := newHandlerTestRouter(t, true)
+	router := newHandlerTestRouterWithOriginsAndSameSite(t, true, http.SameSiteNoneMode, testAllowedOrigins(t))
 	cookie := registerAndGetRefreshCookie(t, router, "prod-cookie@example.com")
 
 	if !cookie.Secure {
 		t.Fatal("expected Secure=true in production configuration")
 	}
 	if cookie.Name != "refresh_token" || cookie.Path != "/auth" || !cookie.HttpOnly ||
-		cookie.SameSite != http.SameSiteLaxMode || cookie.MaxAge != testRefreshCookieMaxAge {
+		cookie.SameSite != http.SameSiteNoneMode || cookie.MaxAge != testRefreshCookieMaxAge {
 		t.Fatalf("unexpected cookie attributes: %#v", cookie)
 	}
 }
 
+func TestProductionCookieAttributesMatchAcrossAllAuthCookieWriters(t *testing.T) {
+	router := newHandlerTestRouterWithOriginsAndSameSite(t, true, http.SameSiteNoneMode, testAllowedOrigins(t))
+	registered := registerAndGetRefreshCookie(t, router, "all-cookie-writers@example.com")
+	assertRefreshCookieAttributes(t, registered, false)
+
+	loggedIn := loginAndGetRefreshCookie(t, router, "all-cookie-writers@example.com")
+	assertRefreshCookieAttributes(t, loggedIn, false)
+
+	rotatedResponse := doRefreshRequest(router, loggedIn.Value, "http://localhost:3000", "cross-site")
+	if rotatedResponse.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d, body %s", rotatedResponse.Code, rotatedResponse.Body.String())
+	}
+	rotated := refreshCookieFromResponse(t, rotatedResponse)
+	assertRefreshCookieAttributes(t, rotated, false)
+
+	logoutResponse := doLogoutRequest(router, rotated.Value, "http://localhost:3000", "cross-site")
+	if logoutResponse.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d, body %s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+	assertRefreshCookieAttributes(t, refreshCookieFromResponse(t, logoutResponse), true)
+}
+
 func TestLogoutClearsCookieWithMatchingAttributes(t *testing.T) {
-	router := newHandlerTestRouter(t, true)
+	router := newHandlerTestRouterWithOriginsAndSameSite(t, true, http.SameSiteNoneMode, testAllowedOrigins(t))
 	regCookie := registerAndGetRefreshCookie(t, router, "logout-cookie@example.com")
 
 	request := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
