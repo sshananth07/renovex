@@ -121,7 +121,32 @@ describe("MaterialResourceAcceptDialog", () => {
     await user.click(screen.getByRole("button", { name: /^add$/i }));
 
     expect(onCreateAndAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Tile Spacers", unit: "bag", referencePriceAmount: 500, referencePriceCurrency: expect.any(String) })
+      expect.objectContaining({ name: "Tile Spacers", unit: "bag", referencePriceAmount: 500, referencePriceCurrency: "MYR" })
+    );
+  });
+
+  it("preserves an explicitly configured non-MYR currency", async () => {
+    const onCreateAndAdd = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <MaterialResourceAcceptDialog
+        suggestedName="Tile Spacers"
+        candidate={null}
+        otherMaterials={[]}
+        onAcceptExisting={vi.fn()}
+        onCreateAndAdd={onCreateAndAdd}
+        onReject={vi.fn()}
+        submitting={false}
+        currency="EUR"
+      />
+    );
+    await user.click(screen.getByRole("button", { name: /create & add/i }));
+    await user.type(screen.getByLabelText(/unit/i), "bag");
+    await user.type(screen.getByLabelText(/reference price/i), "5.00");
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(onCreateAndAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ referencePriceCurrency: "EUR" })
     );
   });
 
