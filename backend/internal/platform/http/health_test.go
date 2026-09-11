@@ -30,6 +30,9 @@ func TestHealthEndpointReturns200WithoutDependencies(t *testing.T) {
 // (H7, §21.5): a standalone deployment answers pings while the withdrawal
 // boundary cannot begin. The replica set here is what production requires.
 func TestReadyEndpointReturns200WhenMongoIsUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
