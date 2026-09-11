@@ -20,12 +20,41 @@ import (
 type fakeRoomDraftEditRepo struct {
 	mu           sync.Mutex
 	drafts       *fakeRoomDraftRepo
+	captures     *fakeCaptureRepo
 	recordsByOp  map[string]RoomDraftEditRecord // companyID+"|"+operationID -> record
 	nextRecordID int
 }
 
 func newFakeRoomDraftEditRepo(drafts *fakeRoomDraftRepo) *fakeRoomDraftEditRepo {
 	return &fakeRoomDraftEditRepo{drafts: drafts, recordsByOp: map[string]RoomDraftEditRecord{}}
+}
+
+func (f *fakeRoomDraftEditRepo) DeleteFixtureRoomDraft(_ context.Context, companyID, captureID, roomDraftID string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.captures == nil {
+		return 0, ErrFixtureRoomDraftNotRemovable
+	}
+	capture, ok := f.captures.byID[captureID]
+	if !ok || capture.CompanyID != companyID || capture.RoomDraftID != roomDraftID {
+		return 0, ErrFixtureRoomDraftNotRemovable
+	}
+	draft, ok := f.drafts.byID[roomDraftID]
+	if !ok || draft.CompanyID != companyID || draft.CaptureID != captureID || draft.SourceProvider != SourceProviderFixture {
+		return 0, ErrFixtureRoomDraftNotRemovable
+	}
+	capture.RoomDraftID = ""
+	f.captures.byID[captureID] = capture
+	delete(f.drafts.byID, roomDraftID)
+	delete(f.drafts.byCapture, captureID)
+	var deleted int64
+	for key, record := range f.recordsByOp {
+		if record.CompanyID == companyID && record.RoomDraftID == roomDraftID {
+			delete(f.recordsByOp, key)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 func opKey(companyID, operationID string) string { return companyID + "|" + operationID }
@@ -86,6 +115,7 @@ func newTestRoomDraftEditService() (*Service, *fakeRoomDraftRepo, *fakeRoomDraft
 	lookup := newFakeSpaceLookup()
 	drafts := newFakeRoomDraftRepo()
 	edits := newFakeRoomDraftEditRepo(drafts)
+	edits.captures = captures
 	svc := NewService(captures, versions, states, lookup)
 	svc.SetRoomDraftSupport(drafts)
 	svc.SetRoomDraftEditSupport(edits)
