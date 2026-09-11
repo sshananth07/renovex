@@ -17,6 +17,9 @@ import (
 // conditional writes — one open draft per chain, one revision number per chain,
 // one Supplier per RFQ lineage — so an in-memory fake cannot prove them.
 func setupDB(t *testing.T) *mongo.Database {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 
