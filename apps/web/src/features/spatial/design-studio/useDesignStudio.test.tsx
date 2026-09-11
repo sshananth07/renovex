@@ -172,8 +172,17 @@ describe("deriveStudioState", () => {
     expect(deriveStudioState({ ...base, turnStatus: "reasoning" })).toBe("planning");
   });
 
+  it("returns planning immediately while the design-turn submission is pending", () => {
+    expect(deriveStudioState({ ...base, isSubmittingTurn: true })).toBe("planning");
+  });
+
   it("returns plan_blocked for a blocked turn", () => {
     expect(deriveStudioState({ ...base, turnStatus: "blocked" })).toBe("plan_blocked");
+  });
+
+  it("keeps terminal reasoning failures visible", () => {
+    expect(deriveStudioState({ ...base, turnStatus: "failed" })).toBe("failed");
+    expect(deriveStudioState({ ...base, turnStatus: "needs_attention" })).toBe("needs_attention");
   });
 
   it("returns plan_ready for a proposed turn with no attempt yet", () => {
