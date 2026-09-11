@@ -211,7 +211,17 @@ describe("ResourceSuggestionReview", () => {
     await user.click(screen.getByRole("button", { name: /^add$/i }));
 
     await waitFor(() => expect(acceptedBody).not.toBeNull());
-    expect(acceptedBody).toMatchObject({ material: { mode: "create" } });
+    expect(acceptedBody).toMatchObject({
+      material: {
+        mode: "create",
+        newMaterial: {
+          name: "Tile Spacers",
+          unit: "bag",
+          referencePriceAmount: 850,
+          referencePriceCurrency: "MYR",
+        },
+      },
+    });
   });
 
   it("sends material.mode=existing (matching the backend's MaterialAcceptanceMode) when using an existing Material", async () => {
