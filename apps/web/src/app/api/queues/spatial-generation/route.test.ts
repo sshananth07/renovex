@@ -40,6 +40,12 @@ describe("spatial-generation queue consumer", () => {
     return capturedHandler;
   }
 
+  it("declares the 120-second Vercel function duration in the route segment", async () => {
+    const { maxDuration } = await import("./route");
+
+    expect(maxDuration).toBe(120);
+  });
+
   it("calls the design-generation worker route for a design_attempt message", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ processed: true, terminal: false, nextWakeDelaySeconds: 5 }), { status: 200 }),
