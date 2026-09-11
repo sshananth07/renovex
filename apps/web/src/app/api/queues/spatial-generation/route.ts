@@ -1,6 +1,8 @@
 import { handleCallback } from "@vercel/queue";
 import { publishSpatialGenerationWake, type SpatialGenerationWakeMessage } from "@/lib/server/spatialGenerationQueue";
 
+export const maxDuration = 120;
+
 /**
  * RP4E2 Gate 4's private Queue consumer. Vercel invokes this route when a
  * message is available on the spatial-generation topic (see vercel.json's
