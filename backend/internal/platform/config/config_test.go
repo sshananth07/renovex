@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -338,6 +339,32 @@ func TestLoadFromEnvRefreshCookieSecureDefaultsTrue(t *testing.T) {
 	}
 	if !cfg.RefreshCookieSecure {
 		t.Fatal("expected RefreshCookieSecure to default to true")
+	}
+	if got := cfg.RefreshCookieSameSite; got != http.SameSiteLaxMode {
+		t.Fatalf("RefreshCookieSameSite = %v, want SameSite=Lax", got)
+	}
+}
+
+func TestLoadFromEnvReadsRefreshCookieSameSiteNone(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("AUTH_REFRESH_COOKIE_SAME_SITE", "none")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.RefreshCookieSameSite; got != http.SameSiteNoneMode {
+		t.Fatalf("RefreshCookieSameSite = %v, want SameSite=None", got)
+	}
+}
+
+func TestLoadFromEnvRejectsInvalidRefreshCookieSameSite(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("AUTH_REFRESH_COOKIE_SAME_SITE", "cross-site")
+
+	if _, err := LoadFromEnv(); err == nil {
+		t.Fatal("expected an error for an invalid AUTH_REFRESH_COOKIE_SAME_SITE")
 	}
 }
 
