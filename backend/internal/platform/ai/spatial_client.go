@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 // spatialErrorResponseBody mirrors errorResponseBody's role in client.go
@@ -39,6 +41,7 @@ type SpatialClient struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+	logger     zerolog.Logger
 }
 
 // NewSpatialClient constructs a SpatialClient against baseURL, bounding
@@ -46,9 +49,21 @@ type SpatialClient struct {
 // (http.ErrUseLastResponse, mirroring the plan's "no redirects" requirement
 // exactly like SpatialProvider's own transport-level policy).
 func NewSpatialClient(baseURL, token string, timeout time.Duration) *SpatialClient {
+	return newSpatialClient(baseURL, token, timeout, zerolog.Nop())
+}
+
+// NewSpatialClientWithLogger constructs a SpatialClient with safe outbound
+// request-boundary diagnostics. The logger never receives credentials,
+// authorization headers, prompts, or RoomDraft payloads.
+func NewSpatialClientWithLogger(baseURL, token string, timeout time.Duration, logger zerolog.Logger) *SpatialClient {
+	return newSpatialClient(baseURL, token, timeout, logger)
+}
+
+func newSpatialClient(baseURL, token string, timeout time.Duration, logger zerolog.Logger) *SpatialClient {
 	return &SpatialClient{
 		baseURL: baseURL,
 		token:   token,
+		logger:  logger,
 		httpClient: &http.Client{
 			Timeout: timeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -64,27 +79,44 @@ func NewSpatialClient(baseURL, token string, timeout time.Duration) *SpatialClie
 // this client has no retry logic of its own.
 func (c *SpatialClient) ReasonElement(ctx context.Context, req SpatialReasoningRequest) (SpatialReasoningResponse, error) {
 	var resp SpatialReasoningResponse
+	startedAt := time.Now()
 
 	payload, err := json.Marshal(req)
 	if err != nil {
+		c.logFailure(req, startedAt, "request_encode_failed", "service_unavailable")
 		return SpatialReasoningResponse{}, fmt.Errorf("ai: encoding spatial reasoning request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/spatial/element-proposals/reason", bytes.NewReader(payload))
 	if err != nil {
+		c.logFailure(req, startedAt, "request_build_failed", "service_unavailable")
 		return SpatialReasoningResponse{}, fmt.Errorf("ai: building spatial reasoning request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.token)
+	c.logger.Info().
+		Str("turn_id", req.TurnID).
+		Str("room_draft_id", req.RoomDraftID).
+		Int64("room_draft_revision", req.RoomDraftRevision).
+		Str("destination_host", httpReq.URL.Host).
+		Str("destination_path", httpReq.URL.Path).
+		Msg("spatial reasoning request started")
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || isTimeoutErr(err) {
+			c.logFailure(req, startedAt, "transport_timeout", "provider_timeout")
 			return SpatialReasoningResponse{}, ErrProviderTimeout
 		}
+		c.logFailure(req, startedAt, "transport_failure", "service_unavailable")
 		return SpatialReasoningResponse{}, ErrServiceUnavailable
 	}
 	defer httpResp.Body.Close()
+	c.logger.Info().
+		Str("turn_id", req.TurnID).
+		Int("http_status", httpResp.StatusCode).
+		Dur("duration", time.Since(startedAt)).
+		Msg("spatial reasoning response received")
 
 	// CheckRedirect above prevents http.Client from following a 3xx
 	// automatically; a redirect status here means it was returned directly
@@ -92,6 +124,7 @@ func (c *SpatialClient) ReasonElement(ctx context.Context, req SpatialReasoningR
 	// CheckRedirect returns ErrUseLastResponse) — treated as invalid
 	// output, never followed.
 	if httpResp.StatusCode >= 300 && httpResp.StatusCode < 400 {
+		c.logFailure(req, startedAt, "unexpected_redirect", "invalid_service_response")
 		return SpatialReasoningResponse{}, ErrInvalidServiceResponse
 	}
 
@@ -101,9 +134,11 @@ func (c *SpatialClient) ReasonElement(ctx context.Context, req SpatialReasoningR
 	bounded := io.LimitReader(httpResp.Body, maxSpatialResponseBytes+1)
 	rawBody, err := io.ReadAll(bounded)
 	if err != nil {
+		c.logFailure(req, startedAt, "response_read_failed", "invalid_service_response")
 		return SpatialReasoningResponse{}, ErrInvalidServiceResponse
 	}
 	if len(rawBody) > maxSpatialResponseBytes {
+		c.logFailure(req, startedAt, "response_too_large", "invalid_service_response")
 		return SpatialReasoningResponse{}, ErrInvalidServiceResponse
 	}
 
@@ -111,12 +146,14 @@ func (c *SpatialClient) ReasonElement(ctx context.Context, req SpatialReasoningR
 		decoder := json.NewDecoder(bytes.NewReader(rawBody))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&resp); err != nil {
+			c.logFailure(req, startedAt, "response_decode_failed", "invalid_service_response")
 			return SpatialReasoningResponse{}, ErrInvalidServiceResponse
 		}
 		// A well-formed single JSON value must consume the entire body —
 		// trailing content (a second JSON value, garbage) is rejected
 		// rather than silently ignored.
 		if decoder.More() {
+			c.logFailure(req, startedAt, "response_trailing_content", "invalid_service_response")
 			return SpatialReasoningResponse{}, ErrInvalidServiceResponse
 		}
 		return resp, nil
@@ -130,10 +167,29 @@ func (c *SpatialClient) ReasonElement(ctx context.Context, req SpatialReasoningR
 	decoder := json.NewDecoder(bytes.NewReader(rawBody))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&errBody); err != nil {
+		c.logFailure(req, startedAt, "error_response_decode_failed", "invalid_service_response")
 		return SpatialReasoningResponse{}, ErrInvalidServiceResponse
 	}
 	if sentinel, ok := errorCodeSentinels[errBody.Code]; ok {
+		c.logger.Warn().
+			Str("turn_id", req.TurnID).
+			Int("http_status", httpResp.StatusCode).
+			Str("safe_application_error_code", errBody.Code).
+			Dur("duration", time.Since(startedAt)).
+			Msg("spatial reasoning service rejected request")
 		return SpatialReasoningResponse{}, sentinel
 	}
+	c.logFailure(req, startedAt, "unrecognized_service_error", "service_unavailable")
 	return SpatialReasoningResponse{}, ErrServiceUnavailable
+}
+
+func (c *SpatialClient) logFailure(req SpatialReasoningRequest, startedAt time.Time, failureClass, safeErrorCode string) {
+	c.logger.Warn().
+		Str("turn_id", req.TurnID).
+		Str("room_draft_id", req.RoomDraftID).
+		Int64("room_draft_revision", req.RoomDraftRevision).
+		Str("failure_class", failureClass).
+		Str("safe_error_code", safeErrorCode).
+		Dur("duration", time.Since(startedAt)).
+		Msg("spatial reasoning request failed")
 }
