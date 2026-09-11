@@ -23,6 +23,9 @@ import (
 // setupDB follows the M6 bootstrap convention: raw mongo.Connect, a uniquely
 // named database per test, TerminateContainer in cleanup.
 func setupDB(t *testing.T) *mongo.Database {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 
