@@ -108,7 +108,7 @@ holds Mongo/R2/AI-provider/email secrets.
 | `RESEND_API_KEY` | Go | Yes when `EMAIL_PROVIDER=resend` | Secret | Resend API key |
 | `RESEND_FROM` | Go | Yes when `EMAIL_PROVIDER=resend` | Public | From address |
 | `APP_ALLOWED_ORIGINS` | Go | Yes (https only) | Public | CORS/cookie origin allowlist |
-| `AUTH_REFRESH_COOKIE_SECURE` | Go | Must be `true` in prod | Public | Refresh cookie Secure flag |
+| `AUTH_REFRESH_COOKIE_SECURE` / `AUTH_REFRESH_COOKIE_SAME_SITE` | Go | `true` / `none` for cross-site prod | Public | Refresh cookie Secure and SameSite flags |
 | `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` | Go | Yes | Secret | Session signing |
 | `INVITATION_SECRET_KEY_V*` / Phase D supplier keyrings | Go | Yes if those features are used | Secret | HMAC-derived credential keys |
 | `SPATIAL_WORKER_TOKEN` | Go + Web (server-side) | Optional (enables internal worker routes) | Secret | Protects internal process-one routes |
