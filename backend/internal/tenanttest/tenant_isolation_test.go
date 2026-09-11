@@ -78,6 +78,9 @@ func (m *recordingMailer) sent() []mail.Message {
 func setupRouterWithMail(t *testing.T) (
 	http.Handler, *mongo.Database, *recordingMailer) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
@@ -102,7 +105,7 @@ func setupRouterWithMail(t *testing.T) (
 
 	db := platformmongo.Database(client, "tenanttest")
 	mailer := &recordingMailer{}
-	router, err := tenanttest.BuildRouterWithMailer(db, mailer)
+	router, err := tenanttest.BuildRouterWithMailer(t, db, mailer)
 	if err != nil {
 		t.Fatalf("failed to build router: %v", err)
 	}
