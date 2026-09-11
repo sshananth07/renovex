@@ -16,6 +16,9 @@ import (
 // uniqueness and compare-and-swap guarantees are database behavior, so fakes
 // are not acceptable evidence for those invariants.
 func setupDB(t *testing.T) *mongo.Database {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 	container, err := mongodb.Run(ctx, "mongo:7")
