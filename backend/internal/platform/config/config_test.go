@@ -29,6 +29,20 @@ func TestLoadFromEnvUsesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvPrefersPortOverHTTPPort(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("HTTP_PORT", "8080")
+	t.Setenv("PORT", "4567")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.HTTPPort != "4567" {
+		t.Fatalf("expected PORT to take precedence, got %q", cfg.HTTPPort)
+	}
+}
+
 func TestLoadFromEnvUsesDefaultVisualAssetAccessTTLWhenUnset(t *testing.T) {
 	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
 	t.Setenv("MONGO_DATABASE", "renovation_platform_test")
@@ -769,6 +783,19 @@ func TestLoadFromEnvReadsServerlessMode(t *testing.T) {
 	}
 	if !cfg.ServerlessMode {
 		t.Fatal("expected ServerlessMode true")
+	}
+}
+
+func TestLoadFromEnvUsesServerlessModeOnVercel(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("VERCEL", "1")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.ServerlessMode {
+		t.Fatal("expected VERCEL=1 to enable ServerlessMode")
 	}
 }
 
