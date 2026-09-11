@@ -12,6 +12,17 @@ const STAGE_COPY: Record<ProgressStage, string> = {
 
 const STAGE_ORDER: ProgressStage[] = ["reference", "geometry", "validation"];
 
+function statusMessage(status: DesignGenerationStatus): string {
+  switch (status) {
+    case "asset_generation_pending":
+      return "Queued for generation…";
+    case "asset_generation_processing":
+      return "Generation is running…";
+    default:
+      return "Preparing your design concept…";
+  }
+}
+
 // Maps the server's real attempt status to one of the three operator-safe
 // stages (M8.5C plan: never mention Cloudflare/FLUX/Hugging
 // Face/Hunyuan/ZeroGPU/queues/workers/retries/expected minutes). Returns
@@ -39,6 +50,7 @@ export function DesignProgress({ status }: { status: DesignGenerationStatus }) {
 
   return (
     <div className="grid gap-2" role="status" aria-live="polite">
+      <p className="text-sm font-medium text-foreground">{statusMessage(status)}</p>
       <ul className="grid gap-1.5">
         {STAGE_ORDER.map((stage, index) => {
           const isDone = index < activeIndex;
