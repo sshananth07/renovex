@@ -2,6 +2,8 @@
 tests never depend on process environment variables (design doc section 21:
 secrets exist only in runtime configuration, never hardcoded defaults)."""
 
+import logging
+
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -18,6 +20,8 @@ from app.schemas.work_items import WorkItemSuggestionRequest, WorkItemSuggestion
 from app.services.reference_image import ReferenceImageService
 from app.services.spatial_reasoning import SpatialReasoningService
 from app.services.suggestions import SuggestionService
+
+logger = logging.getLogger(__name__)
 
 
 def _build_provider(settings: Settings):
@@ -185,7 +189,16 @@ def create_app(settings: Settings) -> FastAPI:
             request = SpatialReasoningRequest(**body)
         except ValidationError as exc:
             raise InvalidAIRequest(f"invalid spatial reasoning request: {exc}") from None
-        return service.reason_element(request)
+        logger.info(
+            "spatial_reasoning_request_received turn_id=%s room_draft_id=%s room_draft_revision=%s provider=%s",
+            request.turnId,
+            request.roomDraftId,
+            request.roomDraftRevision,
+            app.state.settings.SPATIAL_AI_PROVIDER,
+        )
+        result = service.reason_element(request)
+        logger.info("spatial_reasoning_response_ready turn_id=%s provider=%s", request.turnId, result.provider)
+        return result
 
     @app.post(
         "/internal/v1/spatial/reference-images/generate",
