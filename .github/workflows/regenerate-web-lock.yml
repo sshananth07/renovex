@@ -1,0 +1,48 @@
+name: Regenerate Web Lockfile
+
+on:
+  workflow_dispatch:
+
+jobs:
+  regenerate:
+    name: Regenerate lockfile on Linux
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.2"
+
+      - name: Show toolchain
+        run: |
+          node --version
+          npm --version
+          uname -a
+
+      - name: Regenerate lockfile on Linux
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install --include=optional
+
+      - name: Verify required emnapi entries exist
+        run: |
+          grep -n '"node_modules/@emnapi/core"' package-lock.json
+          grep -n '"node_modules/@emnapi/runtime"' package-lock.json
+
+      - name: Prove clean npm ci
+        run: |
+          rm -rf node_modules
+          npm ci --include=optional
+
+      - name: Upload regenerated lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-web-package-lock
+          path: apps/web/package-lock.json
+          if-no-files-found: error
