@@ -60,21 +60,21 @@ type Services struct {
 	Users                    *identity.UserService
 	JWTIssuer                *identity.JWTIssuer
 	RegistrationVerification *identity.RegistrationVerificationService
-	Companies  *companies.Service
-	Clients    *clients.Service
-	Projects   *projects.Service
-	Properties *properties.Service
-	Spaces     *spaces.Service
-	Spatial    *spatial.Service
-	Work       *work.Service
-	Materials  *materials.Service
-	Costs      *costs.Service
-	Labour     *labour.Service
-	Estimates  *estimates.Service
-	Quotations *quotations.Service
-	Approvals  *approvals.Service
-	Audit      *audit.Service
-	Access     *access.Service
+	Companies                *companies.Service
+	Clients                  *clients.Service
+	Projects                 *projects.Service
+	Properties               *properties.Service
+	Spaces                   *spaces.Service
+	Spatial                  *spatial.Service
+	Work                     *work.Service
+	Materials                *materials.Service
+	Costs                    *costs.Service
+	Labour                   *labour.Service
+	Estimates                *estimates.Service
+	Quotations               *quotations.Service
+	Approvals                *approvals.Service
+	Audit                    *audit.Service
+	Access                   *access.Service
 
 	MaterialRequirements *materialrequirements.Service
 	RFQs                 *rfqs.Service
@@ -582,7 +582,7 @@ func BuildServices(ctx context.Context, cfg config.Config, logger zerolog.Logger
 	// route lives on the same FastAPI deployment) but a DEDICATED timeout
 	// (AISpatialServiceTimeout) and a SEPARATE SpatialClient — Copilot's
 	// decoding behavior is never touched.
-	spatialReasoningClient := platformai.NewSpatialClient(cfg.AIServiceURL, cfg.AIInternalToken, cfg.AISpatialServiceTimeout)
+	spatialReasoningClient := platformai.NewSpatialClientWithLogger(cfg.AIServiceURL, cfg.AIInternalToken, cfg.AISpatialServiceTimeout, logger)
 	spatialService.SetDesignPlanningSupport(spatialDesignRepo, spatialDesignRepo, NewSpatialReasoningAdapter(spatialReasoningClient))
 	// RP4E2/M8.5C Gate 1: attempt/acceptance persistence and atomic Use
 	// Design are wired unconditionally, same "persistence always available,
@@ -877,7 +877,7 @@ func BuildServices(ctx context.Context, cfg config.Config, logger zerolog.Logger
 	return &Services{
 		Auth: authService, Users: userService, JWTIssuer: jwtIssuer,
 		RegistrationVerification: registrationVerificationService,
-		Companies: companiesService, Clients: clientsService,
+		Companies:                companiesService, Clients: clientsService,
 		Projects: projectsService, Properties: propertiesService,
 		Spaces: spacesService, Spatial: spatialService, Work: workService, Materials: materialsService,
 		Costs: costsService, Labour: labourService, Estimates: estimatesService,
