@@ -1,0 +1,52 @@
+name: Go integration tests
+
+# T3A: the full go test ./... suite (real MongoDB via testcontainers +
+# Mailpit) moved here from ci.yml's fast push/PR gate — same commands, same
+# infrastructure (local ephemeral Docker containers only, no real external
+# provider), just a slower/less frequent trigger so merging to main is not
+# blocked on a 20+ minute run. No integration test was removed or weakened;
+# ci.yml's own fast job already runs every ordinary unit/domain test via
+# -short.
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Nightly, well outside normal working hours. Simple single-line cron;
+    # add sharding/parallel matrix later only if this stays slow after the
+    # T3A correctness fixes (registration_verification_challenges manifest,
+    # rfqissuance concurrency race, tenant-AI fixture, /spatial-* storage
+    # roots) — not attempted in this pass per its own explicit scope.
+    - cron: "0 18 * * *"
+
+jobs:
+  go-integration:
+    name: Go backend (full, integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Mailpit backs internal/tenanttest's default SMTP sender (matches
+    # docker-compose.yml's own mailpit service exactly) — without it,
+    # every test exercising RFQ-invitation/company-invite email delivery
+    # fails on "connection refused" rather than a real assertion failure.
+    services:
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: go test (full suite, real Mongo/testcontainers + Mailpit)
+        # testcontainers-go needs a Docker socket, which ubuntu-latest
+        # provides out of the box — every Mongo-backed test in this repo
+        # spins up its own real, ephemeral mongo:7 container this way;
+        # nothing here reaches outside the GitHub Actions runner.
+        run: go test -count=1 ./...
