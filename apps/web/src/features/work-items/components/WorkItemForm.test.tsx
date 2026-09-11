@@ -95,8 +95,11 @@ describe("WorkItemForm", () => {
       />
     );
 
-    await user.click(screen.getByRole("combobox", { name: /space/i }));
-    await user.click(screen.getByRole("option", { name: "No space assigned" }));
+    const trigger = screen.getByRole("combobox", { name: /space/i });
+    await user.click(trigger);
+
+    const noSpaceOption = await screen.findByRole("option", { name: "No space assigned" });
+    await user.click(noSpaceOption);
     await user.click(screen.getByRole("button", { name: /save/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(
