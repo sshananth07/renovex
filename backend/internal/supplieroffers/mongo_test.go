@@ -16,6 +16,9 @@ import (
 // E's uniqueness and compare-and-swap guarantees live in MongoDB indexes and
 // conditional writes, so an in-memory fake cannot prove these boundaries.
 func setupDB(t *testing.T) *mongo.Database {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 
