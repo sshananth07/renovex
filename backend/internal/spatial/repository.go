@@ -62,6 +62,11 @@ var ErrArtifactUploadTokenInvalid = errors.New("spatial: artifact access token i
 // including a draft that exists but belongs to a different company.
 var ErrRoomDraftNotFound = errors.New("spatial: room draft not found")
 
+// ErrFixtureRoomDraftNotRemovable is returned when cleanup does not identify
+// the exact fixture-owned RoomDraft linked to the specified capture. It
+// covers mismatch cases without becoming a generic deletion capability.
+var ErrFixtureRoomDraftNotRemovable = errors.New("spatial: fixture room draft is not removable")
+
 // ErrRoomDraftRevisionMismatch is returned when a CAS-guarded RoomDraft
 // mutation's expected revision no longer matches the stored document.
 var ErrRoomDraftRevisionMismatch = errors.New("spatial: room draft changed since it was read")
@@ -347,6 +352,14 @@ type RoomDraftEditApplier interface {
 	// call's own write actually landed — explicit rather than left for the
 	// caller to infer from revision arithmetic.
 	ApplyAndRecord(ctx context.Context, companyID, roomDraftID string, updatedDraft RoomDraft, expectedRevision int64, record RoomDraftEditRecord) (RoomDraft, RoomDraftEditRecord, bool, error)
+}
+
+// FixtureRoomDraftCleanupRepository is the narrow, internal-only deletion
+// capability used by the production spatial smoke fixture tool. It clears
+// the exact capture association and deletes only the matching fixture
+// RoomDraft and its audit records in one transaction.
+type FixtureRoomDraftCleanupRepository interface {
+	DeleteFixtureRoomDraft(ctx context.Context, companyID, captureID, roomDraftID string) (editRecordCount int64, err error)
 }
 
 // ErrDesignSessionNotFound is returned when a SpatialDesignSession lookup
