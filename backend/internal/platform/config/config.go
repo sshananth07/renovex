@@ -425,10 +425,14 @@ func loadAssetGenerationRuntimeNotice() (enabled bool, text string, err error) {
 	return enabled, text, nil
 }
 
-// defaultHunyuanProviderTimeout matches spatial's
-// defaultAssetGenerationProviderTimeout (duplicated rather than
-// imported — config must not depend on any other platform package).
-const defaultHunyuanProviderTimeout = 9 * time.Minute
+// defaultHunyuanProviderTimeout allows roughly a 15-30s transport/queue/
+// serialization margin beyond the deployed HF Space's actual GPU execution
+// budget (@spaces.GPU(duration=90) — 90s), rather than the previous 9m
+// default which vastly overshot the real upstream budget. Durable
+// JobExecution lease/retry behavior (see spatial.defaultAssetGenerationLeaseTTL)
+// is unaffected by this value — a shorter provider timeout simply surfaces a
+// stalled call sooner, in line with the existing retry-on-next-wake model.
+const defaultHunyuanProviderTimeout = 110 * time.Second
 
 // loadHuggingFaceConfig mirrors loadAIServiceConfig's optional-together
 // pattern exactly (RP4E0): HUGGINGFACE_SPACE_URL and HUGGINGFACE_TOKEN
