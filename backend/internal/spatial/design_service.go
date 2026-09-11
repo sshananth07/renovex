@@ -245,6 +245,10 @@ func (s *Service) CreateDesignTurn(ctx context.Context, companyID, userID, sessi
 	if wasReplay {
 		return reserved, true, nil
 	}
+	// The durable turn ID exists only after reservation. Add it to the
+	// already-built bounded context before the single Python dispatch; it is
+	// server-authoritative correlation data, not browser input.
+	reasoningContext.TurnID = reserved.ID
 
 	// 5. Immediate draft revision recheck (RP4E1 plan: "immediately before
 	// provider dispatch"). If it changed between step 2 and now, fail this
