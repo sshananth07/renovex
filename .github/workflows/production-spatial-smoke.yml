@@ -1,0 +1,111 @@
+name: Production spatial smoke fixture
+
+# This is intentionally the sole trigger. It never runs on a commit, pull
+# request, schedule, or deployment. Configure the referenced GitHub
+# Environment with required reviewers before enabling this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Fixture action"
+        required: true
+        type: choice
+        options:
+          - seed
+          - cleanup
+      company_id:
+        description: "Exact target company ID"
+        required: true
+        type: string
+      project_id:
+        description: "Required for seed; optional for cleanup"
+        required: false
+        type: string
+      space_id:
+        description: "Required for seed; optional for cleanup"
+        required: false
+        type: string
+      capture_id:
+        description: "Exact normal-API-created TEST capture ID (clientCaptureId begins test-spatial-)"
+        required: true
+        type: string
+      room_draft_id:
+        description: "Required for cleanup; use the roomDraftId reported by seed"
+        required: false
+        type: string
+      confirm_production:
+        description: "Type exactly SEED_PRODUCTION_TEST_DATA"
+        required: true
+        type: string
+
+concurrency:
+  group: production-spatial-smoke-${{ inputs.company_id }}-${{ inputs.capture_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    name: ${{ inputs.action }} tenant-scoped spatial fixture
+    runs-on: ubuntu-latest
+    # Create this Environment in GitHub settings and require reviewer
+    # approval. It holds only a least-privilege production Atlas account.
+    environment: production-spatial-smoke
+    defaults:
+      run:
+        working-directory: backend
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Require production confirmation and selected identifiers
+        env:
+          ACTION: ${{ inputs.action }}
+          COMPANY_ID: ${{ inputs.company_id }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          SPACE_ID: ${{ inputs.space_id }}
+          CAPTURE_ID: ${{ inputs.capture_id }}
+          ROOM_DRAFT_ID: ${{ inputs.room_draft_id }}
+          CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+        run: |
+          test "$CONFIRM_PRODUCTION" = "SEED_PRODUCTION_TEST_DATA" || { echo "::error::exact production confirmation is required"; exit 1; }
+          test -n "$COMPANY_ID" || { echo "::error::company_id is required"; exit 1; }
+          test -n "$CAPTURE_ID" || { echo "::error::capture_id is required"; exit 1; }
+          if [ "$ACTION" = "seed" ]; then
+            test -n "$PROJECT_ID" || { echo "::error::project_id is required for seed"; exit 1; }
+            test -n "$SPACE_ID" || { echo "::error::space_id is required for seed"; exit 1; }
+          fi
+          if [ "$ACTION" = "cleanup" ]; then
+            test -n "$ROOM_DRAFT_ID" || { echo "::error::room_draft_id is required for cleanup"; exit 1; }
+          fi
+
+      - name: Run guarded fixture action
+        env:
+          # The command independently requires both of these; the workflow
+          # confirmation check above is an additional, not substituted, gate.
+          APP_ENV: production
+          RENOVEX_ALLOW_PROD_SEED: "true"
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DATABASE: ${{ secrets.MONGO_DATABASE }}
+          ACTION: ${{ inputs.action }}
+          COMPANY_ID: ${{ inputs.company_id }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          SPACE_ID: ${{ inputs.space_id }}
+          CAPTURE_ID: ${{ inputs.capture_id }}
+          ROOM_DRAFT_ID: ${{ inputs.room_draft_id }}
+        run: |
+          args=("$ACTION" --company-id "$COMPANY_ID" --capture-id "$CAPTURE_ID" --confirm-production-seed)
+          if [ "$ACTION" = "seed" ]; then
+            args+=(--project-id "$PROJECT_ID" --space-id "$SPACE_ID")
+          else
+            args+=(--room-draft-id "$ROOM_DRAFT_ID")
+          fi
+          go run ./cmd/seed-spatial-fixture "${args[@]}"
