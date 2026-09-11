@@ -20,17 +20,17 @@ concurrency:
 
 jobs:
   go:
-    name: Go backend
+    name: Go backend (fast)
     runs-on: ubuntu-latest
-    # Mailpit backs internal/tenanttest's default SMTP sender (matches
-    # docker-compose.yml's own mailpit service exactly) — without it,
-    # every test exercising RFQ-invitation/company-invite email delivery
-    # fails on "connection refused" rather than a real assertion failure.
-    services:
-      mailpit:
-        image: axllent/mailpit:latest
-        ports:
-          - 1025:1025
+    # T3A repair: the full `go test ./...` (Mongo-testcontainers/Mailpit
+    # integration suite) previously ran HERE and took >22 minutes,
+    # dominated by a handful of packages (spatial ~238s, supplieroffers
+    # ~459s, tenanttest timing out at 600s) — see integration.yml, which
+    # now owns that suite on its own separate trigger. This job stays fast
+    # by running ONLY with -short, which every Mongo/Docker-backed test's
+    # own shared setup helper (setupMongoDB/setupDB/setupRouterWithMail/
+    # etc.) now skips via `if testing.Short() { t.Skip(...) }` — ordinary
+    # unit/domain tests are unaffected and keep running here.
     defaults:
       run:
         working-directory: backend
@@ -40,21 +40,25 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
           cache-dependency-path: backend/go.sum
 
-      - name: go build
-        run: go build ./...
+      - name: go mod download
+        run: go mod download
+
+      - name: go test -short
+        # Intentionally NOT -count=1 — this fast job wants Go's normal
+        # successful-test-result cache on re-runs of an unchanged package.
+        # Default -parallel/-p (GOMAXPROCS-based) — no override; nothing
+        # here has been measured to benefit from a non-default value.
+        run: go test -short ./...
 
       - name: go vet
         run: go vet ./...
 
-      - name: go test
-        # testcontainers-go needs a Docker socket, which ubuntu-latest
-        # provides out of the box — every Mongo-backed test in this repo
-        # already spins up its own real, ephemeral mongo:7 container this
-        # way (see internal/platform/mongo's shared test helper); nothing
-        # here reaches outside the GitHub Actions runner.
-        run: go test ./...
+      - name: go build
+        run: go build ./...
 
   web:
     name: Web
