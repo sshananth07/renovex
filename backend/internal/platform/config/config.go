@@ -556,7 +556,7 @@ func loadTrustedProxyCIDRs() ([]netip.Prefix, error) {
 func LoadFromEnv() (Config, error) {
 	cfg := Config{
 		AppEnv:   getEnvOrDefault("APP_ENV", "development"),
-		HTTPPort: getEnvOrDefault("HTTP_PORT", "8080"),
+		HTTPPort: getEnvOrDefault("PORT", getEnvOrDefault("HTTP_PORT", "8080")),
 
 		MongoURI:      os.Getenv("MONGO_URI"),
 		MongoDatabase: os.Getenv("MONGO_DATABASE"),
@@ -765,7 +765,7 @@ func LoadFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.ServerlessMode = serverlessMode
+	cfg.ServerlessMode = serverlessMode || os.Getenv("VERCEL") == "1"
 
 	if cfg.AppEnv == "production" {
 		if cfg.AllowedOrigins.Len() == 0 {
