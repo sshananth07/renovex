@@ -27,9 +27,10 @@ const (
 // persistence and record creation cannot produce an unrecorded successful
 // edit").
 type MongoRoomDraftEditRepository struct {
-	client           *mongo.Client
-	editsCollection  *mongo.Collection
-	draftsCollection *mongo.Collection
+	client             *mongo.Client
+	editsCollection    *mongo.Collection
+	draftsCollection   *mongo.Collection
+	capturesCollection *mongo.Collection
 }
 
 // NewMongoRoomDraftEditRepository takes db (not just a collection) because
@@ -38,10 +39,65 @@ type MongoRoomDraftEditRepository struct {
 // *mongo.Client without changing composition.BuildServices' signature.
 func NewMongoRoomDraftEditRepository(db *mongo.Database) *MongoRoomDraftEditRepository {
 	return &MongoRoomDraftEditRepository{
-		client:           db.Client(),
-		editsCollection:  db.Collection("spatial_room_draft_edits"),
-		draftsCollection: db.Collection("spatial_room_drafts"),
+		client:             db.Client(),
+		editsCollection:    db.Collection("spatial_room_draft_edits"),
+		draftsCollection:   db.Collection("spatial_room_drafts"),
+		capturesCollection: db.Collection("spatial_captures"),
 	}
+}
+
+// DeleteFixtureRoomDraft atomically clears the exact capture's RoomDraft
+// association, deletes that fixture RoomDraft, and deletes only that draft's
+// edit records. Every filter includes company ID; the draft filter also
+// requires capture ID and fixture provenance, so this internal cleanup
+// capability cannot delete ordinary spatial data.
+func (r *MongoRoomDraftEditRepository) DeleteFixtureRoomDraft(ctx context.Context, companyID, captureID, roomDraftID string) (int64, error) {
+	captureObjectID, err := bson.ObjectIDFromHex(captureID)
+	if err != nil {
+		return 0, ErrFixtureRoomDraftNotRemovable
+	}
+	draftObjectID, err := bson.ObjectIDFromHex(roomDraftID)
+	if err != nil {
+		return 0, ErrFixtureRoomDraftNotRemovable
+	}
+
+	session, err := r.client.StartSession()
+	if err != nil {
+		return 0, err
+	}
+	defer session.EndSession(ctx)
+
+	result, err := session.WithTransaction(ctx, func(transactionContext context.Context) (any, error) {
+		captureResult, updateErr := r.capturesCollection.UpdateOne(transactionContext,
+			bson.M{"_id": captureObjectID, "companyId": companyID, "roomDraftId": roomDraftID},
+			bson.M{"$set": bson.M{"roomDraftId": "", "updatedAt": time.Now()}})
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		if captureResult.MatchedCount != 1 {
+			return nil, ErrFixtureRoomDraftNotRemovable
+		}
+
+		draftResult, deleteErr := r.draftsCollection.DeleteOne(transactionContext,
+			bson.M{"_id": draftObjectID, "companyId": companyID, "captureId": captureID, "sourceProvider": string(SourceProviderFixture)})
+		if deleteErr != nil {
+			return nil, deleteErr
+		}
+		if draftResult.DeletedCount != 1 {
+			return nil, ErrFixtureRoomDraftNotRemovable
+		}
+
+		editResult, deleteErr := r.editsCollection.DeleteMany(transactionContext,
+			bson.M{"companyId": companyID, "roomDraftId": roomDraftID})
+		if deleteErr != nil {
+			return nil, deleteErr
+		}
+		return editResult.DeletedCount, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return result.(int64), nil
 }
 
 func (r *MongoRoomDraftEditRepository) EnsureIndexes(ctx context.Context) error {
