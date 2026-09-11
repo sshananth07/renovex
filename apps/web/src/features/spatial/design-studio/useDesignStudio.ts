@@ -173,6 +173,7 @@ export function deriveStudioState(input: {
   target: Selection;
   isSupportedKind: boolean;
   isRestoring: boolean;
+  isSubmittingTurn?: boolean;
   turnStatus?: "reserved" | "reasoning" | "proposed" | "blocked" | "failed" | "needs_attention" | "superseded" | "stale";
   attemptStatus?: import("./types").DesignGenerationStatus;
   isStalePlan: boolean;
@@ -182,6 +183,7 @@ export function deriveStudioState(input: {
   if (!input.isSupportedKind) return "unsupported";
   if (input.isRestoring) return "restoring";
   if (input.isStalePlan) return "stale";
+  if (input.isSubmittingTurn) return "planning";
 
   if (input.attemptStatus === "accepted") return "accepted";
   if (input.isRegenerating) return "regenerating";
@@ -202,6 +204,8 @@ export function deriveStudioState(input: {
   if (input.turnStatus === "reserved" || input.turnStatus === "reasoning") return "planning";
   if (input.turnStatus === "blocked") return "plan_blocked";
   if (input.turnStatus === "proposed") return "plan_ready";
+  if (input.turnStatus === "failed") return "failed";
+  if (input.turnStatus === "needs_attention") return "needs_attention";
 
   return "welcome";
 }
