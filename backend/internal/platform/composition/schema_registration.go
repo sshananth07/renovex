@@ -1,6 +1,8 @@
 package composition
 
 import (
+	"net/http"
+
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/shananth/renovation-platform/backend/internal/access"
@@ -59,7 +61,7 @@ func RegisterAllForSchema(api huma.API) {
 	platformhttp.RegisterHealth(api, nil, "")
 
 	emptyOrigins, _ := config.NewAllowedOriginsForTest(nil)
-	identity.RegisterHandlers(api, nil, 0, true, emptyOrigins)
+	identity.RegisterHandlers(api, nil, 0, true, http.SameSiteLaxMode, emptyOrigins)
 	identity.RegisterRegistrationVerificationHandlers(api, nil)
 
 	supplieraccess.RegisterHandlers(api, nil, false)
