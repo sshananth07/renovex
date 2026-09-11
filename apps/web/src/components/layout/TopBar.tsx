@@ -57,11 +57,11 @@ export function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
               </button>
             }
           />
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)]">
             <DropdownMenuGroup>
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium text-foreground">
+                  <span className="break-all text-sm font-medium text-foreground">
                     {user?.email}
                   </span>
                   <span className="text-xs text-muted-foreground capitalize">
