@@ -178,6 +178,7 @@ export function AIDesignStudio({
         // settling, then immediately snaps to "restoring" once sessionId
         // lands (a real, user-visible flicker caught by an integration test).
         isRestoring: ensureSession.isPending || (Boolean(studio.sessionId) && (sessionQuery.isLoading || turnsQuery.isLoading)),
+        isSubmittingTurn: createTurn.isPending,
         turnStatus: latestTurn?.status as never,
         attemptStatus: attemptQuery.data?.status as never,
         isStalePlan,
@@ -190,6 +191,7 @@ export function AIDesignStudio({
       studio.sessionId,
       sessionQuery.isLoading,
       turnsQuery.isLoading,
+      createTurn.isPending,
       latestTurn?.status,
       attemptQuery.data?.status,
       isStalePlan,
@@ -389,6 +391,7 @@ function StudioBody(props: {
   useDesignPending: boolean;
 }) {
   const { state } = props;
+  const isReasoning = props.latestTurn?.status === "reasoning";
 
   switch (state) {
     case "empty":
@@ -425,8 +428,12 @@ function StudioBody(props: {
     case "planning":
       return (
         <div className="grid gap-2" role="status" aria-live="polite">
-          <p className="text-sm font-medium text-foreground">Understanding your idea…</p>
-          <p className="text-xs leading-4 text-muted-foreground">Checking fit and preparing the change plan.</p>
+          <p className="text-sm font-medium text-foreground">
+            {isReasoning ? "AI is reasoning about the selected object…" : "Submitting design request…"}
+          </p>
+          <p className="text-xs leading-4 text-muted-foreground">
+            {isReasoning ? "Checking fit and preparing the change plan." : "Saving your request before AI reasoning begins."}
+          </p>
         </div>
       );
 
@@ -449,14 +456,17 @@ function StudioBody(props: {
     case "plan_ready":
       if (!props.latestTurn?.changePlan) return null;
       return (
-        <AIChangePlanCard
-          plan={props.latestTurn.changePlan}
-          execution={props.latestTurn.execution}
-          fitAnalysis={props.latestTurn.fitAnalysis}
-          onConfirm={props.onConfirm}
-          onEditPrompt={props.onEditPrompt}
-          confirmDisabled={props.confirmPending}
-        />
+        <div className="grid gap-2">
+          <p role="status" className="text-sm font-medium text-foreground">Design proposal ready.</p>
+          <AIChangePlanCard
+            plan={props.latestTurn.changePlan}
+            execution={props.latestTurn.execution}
+            fitAnalysis={props.latestTurn.fitAnalysis}
+            onConfirm={props.onConfirm}
+            onEditPrompt={props.onEditPrompt}
+            confirmDisabled={props.confirmPending}
+          />
+        </div>
       );
 
     case "geometry_generating":
@@ -486,7 +496,14 @@ function StudioBody(props: {
     case "failed":
       return (
         <p role="alert" className="text-sm leading-5 text-destructive">
-          This concept could not be created. You can try again with the same or a new idea.
+          AI couldn't create a valid design proposal. You can try again with the same or a new idea.
+        </p>
+      );
+
+    case "needs_attention":
+      return (
+        <p role="alert" className="text-sm leading-5 text-destructive">
+          AI Design needs attention before this request can continue. Please try again shortly.
         </p>
       );
 
