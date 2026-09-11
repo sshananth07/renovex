@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
@@ -139,6 +140,11 @@ type Config struct {
 	// attribute. Defaults to true; only development/test environments may set
 	// it false (over plain http://localhost), and production may not.
 	RefreshCookieSecure bool
+
+	// RefreshCookieSameSite controls the refresh-token cookie's SameSite
+	// attribute. It defaults to Lax for local development, while deployments
+	// with a cross-site browser frontend must explicitly select None.
+	RefreshCookieSameSite http.SameSite
 
 	// ObjectStoreProvider selects "local" (LocalObjectStore, three physical
 	// roots preserved for dev) or "r2" (one shared R2ObjectStore instance
@@ -730,6 +736,12 @@ func LoadFromEnv() (Config, error) {
 	}
 	cfg.RefreshCookieSecure = refreshCookieSecure
 
+	refreshCookieSameSite, err := getRefreshCookieSameSite()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.RefreshCookieSameSite = refreshCookieSameSite
+
 	objectStoreProvider, r2AccountID, r2AccessKeyID, r2SecretAccessKey, r2Bucket, r2Endpoint, err := loadObjectStoreConfig()
 	if err != nil {
 		return Config{}, err
@@ -840,6 +852,19 @@ func getEnvBoolOrDefault(key string, fallback bool) (bool, error) {
 		return false, nil
 	default:
 		return false, fmt.Errorf("config: %s must be \"true\" or \"false\", got %q", key, raw)
+	}
+}
+
+func getRefreshCookieSameSite() (http.SameSite, error) {
+	switch getEnvOrDefault("AUTH_REFRESH_COOKIE_SAME_SITE", "lax") {
+	case "lax":
+		return http.SameSiteLaxMode, nil
+	case "strict":
+		return http.SameSiteStrictMode, nil
+	case "none":
+		return http.SameSiteNoneMode, nil
+	default:
+		return 0, fmt.Errorf("config: AUTH_REFRESH_COOKIE_SAME_SITE must be one of \"lax\", \"strict\", or \"none\"")
 	}
 }
 
