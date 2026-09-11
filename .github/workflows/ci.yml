@@ -67,16 +67,16 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.23.2"
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
       - name: npm ci
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: typecheck
         run: npm run typecheck
@@ -125,14 +125,14 @@ jobs:
     name: OpenAPI/Web client freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22.23.2"
           cache: npm
@@ -140,7 +140,7 @@ jobs:
 
       - name: npm ci
         working-directory: apps/web
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: regenerate OpenAPI from the current Go handlers
         working-directory: backend
