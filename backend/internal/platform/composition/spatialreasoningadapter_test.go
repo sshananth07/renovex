@@ -14,6 +14,7 @@ import (
 
 func testReasoningContext() spatial.DesignReasoningContext {
 	return spatial.DesignReasoningContext{
+		TurnID: "turn_server_123", RoomDraftID: "roomdraft_server_456", RoomDraftRevision: 17,
 		Target: spatial.AuthorizedDesignTarget{
 			Kind: spatial.DesignTargetKindObject, ID: "object_sofa_123", Category: "sofa",
 			Transform:  spatial.RoomLocalTransform{Position: spatial.RoomLocalPoint{X: 1.2, Y: 0, Z: 2.4}, Rotation: spatial.RoomLocalQuaternion{W: 1}},
@@ -75,6 +76,22 @@ func TestSpatialReasoningAdapter_TranslatesContextAndMapsResponse(t *testing.T) 
 	}
 	if gotBody.SelectedElement.ID != "object_sofa_123" {
 		t.Fatalf("expected target forwarded, got %+v", gotBody.SelectedElement)
+	}
+}
+
+func TestSpatialReasoningAdapter_ForwardsServerAuthoritativeReasoningIdentifiers(t *testing.T) {
+	// A regression here recreates the production bug: Python rejects blank
+	// turnId/roomDraftId before selecting a provider, so GLM is never called.
+	request := toSpatialReasoningRequest(testReasoningContext())
+
+	if request.TurnID != "turn_server_123" {
+		t.Fatalf("expected server-authoritative turnId, got %q", request.TurnID)
+	}
+	if request.RoomDraftID != "roomdraft_server_456" {
+		t.Fatalf("expected server-authoritative roomDraftId, got %q", request.RoomDraftID)
+	}
+	if request.RoomDraftRevision != 17 {
+		t.Fatalf("expected authoritative roomDraftRevision 17, got %d", request.RoomDraftRevision)
 	}
 }
 
