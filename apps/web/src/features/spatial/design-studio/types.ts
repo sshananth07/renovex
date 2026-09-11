@@ -102,6 +102,7 @@ export type StudioState =
   | "concept_ready"
   | "regenerating"
   | "failed"
+	| "needs_attention"
   | "stale"
   | "accepted";
 
