@@ -60,3 +60,6 @@ Thumbs.db
 handoff.md 
 
 /artifacts/f1v/
+
+.vercel
+.env*
