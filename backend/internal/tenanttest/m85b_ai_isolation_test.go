@@ -33,9 +33,14 @@ func newStubAIService(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		switch r.URL.Path {
 		case "/internal/v1/spaces/suggest":
+			// evidenceType/sourceExcerpt (T1.5 quality gate) — sourceExcerpt
+			// must actually ground against the brief text ("Full renovation
+			// of a condo.") built by buildProjectWithScopeBrief, or
+			// ApplySpaceQualityGate drops/downgrades the suggestion before
+			// it ever reaches this test.
 			_, _ = w.Write([]byte(`{
 				"provider":"mock","model":"mock-v1","promptVersion":"spaces-v1","schemaVersion":1,
-				"suggestions":[{"name":"Kitchen","spaceType":"kitchen","rationale":"explicit","confidence":0.9}]
+				"suggestions":[{"name":"Kitchen","spaceType":"kitchen","rationale":"explicit","confidence":0.9,"evidenceType":"explicit","sourceExcerpt":"Full renovation of a condo."}]
 			}`))
 		case "/internal/v1/work-items/suggest":
 			// Echo back the first supplied Space's real ID so Go's domain
@@ -43,7 +48,8 @@ func newStubAIService(t *testing.T) *httptest.Server {
 			// accepts the suggestion — a static/fabricated ID would fail
 			// lineage validation, same as production.
 			var req struct {
-				Spaces []struct {
+				ProjectBrief string `json:"projectBrief"`
+				Spaces       []struct {
 					ID string `json:"id"`
 				} `json:"spaces"`
 			}
@@ -52,9 +58,16 @@ func newStubAIService(t *testing.T) *httptest.Server {
 			if len(req.Spaces) > 0 {
 				spaceID = req.Spaces[0].ID
 			}
+			// sourceExcerpt/materialSpecificity (T1.5 quality gate) —
+			// sourceExcerpt must ground against req.ProjectBrief itself
+			// (echoed back here, not the static fixture string above) or
+			// ApplyWorkItemQualityGate drops the suggestion; a real
+			// material ("ceramic floor tiles") is explicitly named in this
+			// fixture's own description, so materialSpecificity=explicit
+			// is accurate, not fabricated.
 			_, _ = w.Write([]byte(`{
 				"provider":"mock","model":"mock-v1","promptVersion":"work-items-v1","schemaVersion":1,
-				"suggestions":[{"description":"Install ceramic floor tiles","workType":"tiling","scopeLevel":"space","spaceId":"` + spaceID + `","scopeOrigin":"explicit_scope","rationale":"explicit","confidence":0.9}]
+				"suggestions":[{"description":"Install ceramic floor tiles","workType":"tiling","scopeLevel":"space","spaceId":"` + spaceID + `","scopeOrigin":"explicit_scope","rationale":"explicit","confidence":0.9,"sourceExcerpt":"` + req.ProjectBrief + `","materialSpecificity":"explicit"}]
 			}`))
 		case "/internal/v1/resources/suggest":
 			// Echo back the first supplied WorkItem's real ID for the same
@@ -83,6 +96,9 @@ func newStubAIService(t *testing.T) *httptest.Server {
 
 func setupAIRouter(t *testing.T) http.Handler {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
@@ -104,7 +120,7 @@ func setupAIRouter(t *testing.T) http.Handler {
 
 	db := platformmongo.Database(client, "tenanttest_ai")
 	aiServer := newStubAIService(t)
-	router, err := tenanttest.BuildRouterWithMailerAndAIServiceURL(db, nil, aiServer.URL)
+	router, err := tenanttest.BuildRouterWithMailerAndAIServiceURL(t, db, nil, aiServer.URL)
 	if err != nil {
 		t.Fatalf("failed to build router: %v", err)
 	}
