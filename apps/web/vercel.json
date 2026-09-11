@@ -2,7 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "src/app/api/queues/spatial-generation/route.ts": {
-      "maxDuration": 120,
       "experimentalTriggers": [
         { "type": "queue/v2beta", "topic": "spatial-generation", "retryAfterSeconds": 30 }
       ]
