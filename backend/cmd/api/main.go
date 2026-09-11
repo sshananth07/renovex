@@ -63,7 +63,7 @@ func main() {
 	// returns ErrAssetGenerationNotConfigured immediately when unwired).
 	dispatchCtx, cancelDispatch := context.WithCancel(context.Background())
 	defer cancelDispatch()
-	if cfg.HuggingFaceSpaceURL != "" {
+	if !cfg.ServerlessMode && cfg.HuggingFaceSpaceURL != "" {
 		composition.StartAssetGenerationDispatchLoop(dispatchCtx, services.Spatial, "api-dispatch-worker", 5*time.Second)
 	}
 
