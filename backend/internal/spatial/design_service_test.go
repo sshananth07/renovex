@@ -9,12 +9,14 @@ import (
 // --- fakes ---
 
 type fakeDesignSessionAndTurnRepo struct {
-	sessions       map[string]SpatialDesignSession
-	sessionsByKey  map[string]string // companyID|clientSessionID -> sessionID
-	turns          map[string]SpatialDesignTurn
-	turnsByRequest map[string]string // companyID|sessionID|clientRequestID -> turnID
-	nextSessionID  int
-	nextTurnID     int
+	sessions        map[string]SpatialDesignSession
+	sessionsByKey   map[string]string // companyID|clientSessionID -> sessionID
+	turns           map[string]SpatialDesignTurn
+	turnsByRequest  map[string]string // companyID|sessionID|clientRequestID -> turnID
+	nextSessionID   int
+	nextTurnID      int
+	reservedTurnID  string
+	reasoningTurnID string
 }
 
 func newFakeDesignRepo() *fakeDesignSessionAndTurnRepo {
@@ -70,6 +72,7 @@ func (f *fakeDesignSessionAndTurnRepo) ReserveTurn(_ context.Context, turn Spati
 	turn.PreviousTurnID = session.LatestTurnID
 	turn.ParentPlanTurnID = session.LatestReadyPlanTurnID
 	f.turns[turn.ID] = turn
+	f.reservedTurnID = turn.ID
 	f.turnsByRequest[key] = turn.ID
 	session.ActiveTurnID = turn.ID
 	session.LatestTurnID = turn.ID
@@ -85,6 +88,7 @@ func (f *fakeDesignSessionAndTurnRepo) MarkProviderStarted(_ context.Context, co
 	}
 	t.ProviderStartedAt = &startedAt
 	t.Status = SpatialDesignTurnStatusReasoning
+	f.reasoningTurnID = turnID
 	f.turns[turnID] = t
 	return nil
 }
@@ -151,17 +155,84 @@ func (f *fakeDesignSessionAndTurnRepo) RecoverInterruptedTurns(_ context.Context
 // the seam every "calls the reasoner zero/one times" assertion in this
 // file depends on.
 type fakeElementReasoner struct {
-	calls  int
-	result ProposedSceneEditDelta
-	err    error
+	calls       int
+	lastContext DesignReasoningContext
+	result      ProposedSceneEditDelta
+	err         error
 }
 
-func (f *fakeElementReasoner) ReasonElement(_ context.Context, _ DesignReasoningContext) (ProposedSceneEditDelta, error) {
+func (f *fakeElementReasoner) ReasonElement(_ context.Context, reasoningContext DesignReasoningContext) (ProposedSceneEditDelta, error) {
 	f.calls++
+	f.lastContext = reasoningContext
 	if f.err != nil {
 		return ProposedSceneEditDelta{}, f.err
 	}
 	return f.result, nil
+}
+
+func TestCreateDesignTurn_KitchenIslandForwardsPersistedIDsAndProposesFitCheckedMove(t *testing.T) {
+	draft := RoomDraft{
+		ID: "roomdraft_kitchen_1", CompanyID: "company_1", CaptureID: "capture_1", Revision: 2,
+		Walls: []RoomDraftWall{
+			{ID: "wall_north", Start: RoomLocalPoint{X: 0, Z: 0}, End: RoomLocalPoint{X: 6, Z: 0}},
+			{ID: "wall_east", Start: RoomLocalPoint{X: 6, Z: 0}, End: RoomLocalPoint{X: 6, Z: 6}},
+			{ID: "wall_south", Start: RoomLocalPoint{X: 6, Z: 6}, End: RoomLocalPoint{X: 0, Z: 6}},
+			{ID: "wall_west", Start: RoomLocalPoint{X: 0, Z: 6}, End: RoomLocalPoint{X: 0, Z: 0}},
+		},
+		Objects: []RoomDraftObject{
+			{ID: "kitchen_island", Category: "kitchen_island", Transform: RoomLocalTransform{Position: RoomLocalPoint{X: 3, Z: 2}, Rotation: RoomLocalQuaternion{W: 1}}, Dimensions: &RoomLocalPoint{X: 1.4, Y: 0.9, Z: 0.8}},
+			{ID: "cabinet_bank", Category: "cabinet", Transform: RoomLocalTransform{Position: RoomLocalPoint{X: 3, Z: 0.5}, Rotation: RoomLocalQuaternion{W: 1}}, Dimensions: &RoomLocalPoint{X: 3, Y: 0.9, Z: 0.6}},
+		},
+	}
+	draftRepo := newFakeRoomDraftRepoForDesign()
+	draftRepo.byID[draft.ID] = draft
+	designRepo := newFakeDesignRepo()
+	reasoner := &fakeElementReasoner{result: ProposedSceneEditDelta{
+		Target: SpatialDesignTarget{Kind: DesignTargetKindObject, ID: "kitchen_island"}, Intent: DesignIntentSpatialDomain,
+		Summary:  []string{"Move the island toward the kitchen center while keeping cabinet clearance."},
+		Geometry: SectionChange{Mode: SectionModePreserve}, Material: SectionChange{Mode: SectionModePreserve},
+		Spatial:    SectionChange{Mode: SectionModeReplace, SpatialSpec: &ProposedSpatialSpec{Kind: SpatialOpMoveRelativeToNearestWall, Relationship: SpatialRelationshipAwayFrom, DistanceMeters: 0.15}},
+		Confidence: 0.9,
+	}}
+	svc := newDesignServiceForTest(draft, draftRepo, designRepo, reasoner)
+
+	session, err := svc.CreateDesignSession(context.Background(), "company_1", "user_1", CreateDesignSessionInput{
+		ClientSessionID: "kitchen-island-session", RoomDraftID: draft.ID, ExpectedRoomDraftRevision: draft.Revision,
+		Target: SpatialDesignTarget{Kind: DesignTargetKindObject, ID: "kitchen_island"},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	turn, _, err := svc.CreateDesignTurn(context.Background(), "company_1", "user_1", session.Session.ID, CreateDesignTurnInput{
+		ClientRequestID: "kitchen-island-turn", Instruction: "Move the island slightly closer to the center of the kitchen while keeping practical clearance from the surrounding cabinets.",
+	})
+	if err != nil {
+		t.Fatalf("create turn: %v", err)
+	}
+	if reasoner.calls != 1 {
+		t.Fatalf("expected exactly one reasoner/provider call, got %d", reasoner.calls)
+	}
+	if designRepo.reservedTurnID != turn.ID || designRepo.reasoningTurnID != turn.ID {
+		t.Fatalf("expected persisted lifecycle reserved -> reasoning for %q, got reserved=%q reasoning=%q", turn.ID, designRepo.reservedTurnID, designRepo.reasoningTurnID)
+	}
+	if reasoner.lastContext.TurnID != turn.ID || reasoner.lastContext.TurnID == "" {
+		t.Fatalf("expected persisted turn ID %q forwarded to the reasoner, got %q", turn.ID, reasoner.lastContext.TurnID)
+	}
+	if reasoner.lastContext.RoomDraftID != draft.ID || reasoner.lastContext.RoomDraftRevision != draft.Revision {
+		t.Fatalf("expected authoritative room draft %q revision %d, got %q revision %d", draft.ID, draft.Revision, reasoner.lastContext.RoomDraftID, reasoner.lastContext.RoomDraftRevision)
+	}
+	if turn.Status != SpatialDesignTurnStatusProposed || turn.ValidatedPlan == nil {
+		t.Fatalf("expected a proposed turn with a validated plan, got status=%q plan=%v", turn.Status, turn.ValidatedPlan)
+	}
+	if turn.ProposedDelta == nil || turn.ProposedDelta.Target.ID != "kitchen_island" {
+		t.Fatalf("expected proposed operation targeting kitchen_island, got %+v", turn.ProposedDelta)
+	}
+	if turn.ValidatedPlan.Fit.Status == "" {
+		t.Fatal("expected Go FitAnalysis to run")
+	}
+	if after := draftRepo.byID[draft.ID]; after.Revision != draft.Revision || len(after.Objects) != len(draft.Objects) {
+		t.Fatalf("RoomDraft changed before Use Design: %+v", after)
+	}
 }
 
 func TestComputeDesignExecutionFlags_MaterialOnlyAfterAcceptedGeometryDoesNotReRequestHunyuan(t *testing.T) {
