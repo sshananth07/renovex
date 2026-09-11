@@ -1,12 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/index.go": {
-      "maxDuration": 120
-    }
-  },
-  "regions": ["sin1"],
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
-  ]
+  "regions": ["sin1"]
 }
