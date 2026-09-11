@@ -45,4 +45,20 @@ describe("TopBar", () => {
       expect(screen.queryByText("Acme Renovations")).toBeNull();
     });
   });
+
+  it("keeps the profile email readable in the account menu", async () => {
+    authenticate();
+    const user = userEvent.setup();
+    renderWithProviders(<TopBar onOpenMenu={vi.fn()} />);
+
+    await screen.findByText("Acme Renovations");
+    await user.click(screen.getByRole("button", { name: "OW" }));
+
+    const email = await screen.findByText("owner@example.com");
+    expect(email).toHaveClass("break-all");
+
+    const menu = email.closest('[data-slot="dropdown-menu-content"]');
+    expect(menu).not.toBeNull();
+    expect(menu).toHaveClass("w-64", "max-w-[calc(100vw-2rem)]");
+  });
 });
