@@ -15,6 +15,9 @@ import (
 // setupInternalDB supports service tests that need package-private boundary
 // fakes and real MongoDB repositories in the same test.
 func setupInternalDB(t *testing.T) *mongo.Database {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 
