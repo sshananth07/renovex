@@ -1,12 +1,15 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 func validSpatialRequest() SpatialReasoningRequest {
@@ -108,6 +111,30 @@ func TestSpatialClient_ExactPathAuthBody(t *testing.T) {
 	}
 	if resp.Delta.Target.ID != "object_sofa_123" {
 		t.Fatalf("unexpected response target: %+v", resp)
+	}
+}
+
+func TestSpatialClient_LogsSafeOutboundBoundary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(validSpatialResponseBody())
+	}))
+	defer server.Close()
+
+	var logs bytes.Buffer
+	client := NewSpatialClientWithLogger(server.URL, "test-token", 5*time.Second, zerolog.New(&logs))
+	if _, err := client.ReasonElement(context.Background(), validSpatialRequest()); err != nil {
+		t.Fatalf("ReasonElement: %v", err)
+	}
+	output := logs.String()
+	for _, want := range []string{"spatial reasoning request started", "turn_002", "roomdraft_001", "destination_host", "destination_path", "spatial reasoning response received", "http_status"} {
+		if !bytes.Contains([]byte(output), []byte(want)) {
+			t.Fatalf("expected safe boundary log field %q in %s", want, output)
+		}
+	}
+	if bytes.Contains([]byte(output), []byte("test-token")) {
+		t.Fatalf("authorization token must not appear in logs: %s", output)
 	}
 }
 
