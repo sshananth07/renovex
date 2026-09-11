@@ -56,7 +56,7 @@ const httpAppRefreshTokenTTL = 7 * 24 * time.Hour
 func NewHTTPHandler(cfg config.Config, logger zerolog.Logger, mongoClient *mongo.Client, services *Services) http.Handler {
 	router, api := platformhttp.NewRouter("Renovation Project Intelligence API", "0.1.0")
 	platformhttp.RegisterHealth(api, mongoClient, cfg.MongoDatabase)
-	identity.RegisterHandlers(api, services.Auth, int(httpAppRefreshTokenTTL.Seconds()), cfg.RefreshCookieSecure, cfg.AllowedOrigins)
+	identity.RegisterHandlers(api, services.Auth, int(httpAppRefreshTokenTTL.Seconds()), cfg.RefreshCookieSecure, cfg.RefreshCookieSameSite, cfg.AllowedOrigins)
 	identity.RegisterRegistrationVerificationHandlers(api, services.RegistrationVerification)
 
 	secureSupplierCookies := cfg.AppEnv != "development" &&
