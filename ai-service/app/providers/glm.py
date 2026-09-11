@@ -12,6 +12,9 @@ logged").
 """
 
 import json
+import logging
+import time
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import ValidationError
@@ -34,6 +37,7 @@ from app.schemas.spatial_reasoning import (
 )
 
 _RETRYABLE_SERVER_STATUS_CODES = {500, 502, 503, 504}
+logger = logging.getLogger(__name__)
 
 
 class GLMProvider:
@@ -82,6 +86,15 @@ class GLMProvider:
             "reasoning_effort": self._reasoning_effort,
         }
 
+        destination = urlparse(f"{self._base_url}/chat/completions")
+        started_at = time.monotonic()
+        logger.info(
+            "glm_spatial_request_started turn_id=%s destination_host=%s destination_path=%s model=%s",
+            request.turnId,
+            destination.hostname,
+            destination.path,
+            self._model,
+        )
         try:
             response = self._client.post(
                 f"{self._base_url}/chat/completions",
@@ -89,9 +102,18 @@ class GLMProvider:
                 headers={"Authorization": f"Bearer {self._api_key}"},
             )
         except httpx.TimeoutException:
+            logger.warning("glm_spatial_request_failed turn_id=%s failure_class=timeout duration_ms=%d", request.turnId, int((time.monotonic() - started_at) * 1000))
             raise ProviderTimeout("spatial reasoning provider request timed out") from None
         except httpx.HTTPError:
+            logger.warning("glm_spatial_request_failed turn_id=%s failure_class=transport duration_ms=%d", request.turnId, int((time.monotonic() - started_at) * 1000))
             raise ProviderUnavailable("spatial reasoning provider request failed") from None
+
+        logger.info(
+            "glm_spatial_response_received turn_id=%s http_status=%s duration_ms=%d",
+            request.turnId,
+            response.status_code,
+            int((time.monotonic() - started_at) * 1000),
+        )
 
         if response.status_code == 429:
             raise ProviderRateLimited("spatial reasoning provider rate limit exceeded")
