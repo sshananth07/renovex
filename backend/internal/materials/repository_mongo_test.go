@@ -15,6 +15,9 @@ import (
 )
 
 func setupMongoDB(t *testing.T) *mongo.Client {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 

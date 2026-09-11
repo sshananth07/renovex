@@ -23,6 +23,9 @@ import (
 // cleanup. A unique DB matters here because several tests exercise unique
 // indexes and must not observe each other's documents.
 func setupDB(t *testing.T) *mongo.Database {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	t.Helper()
 	ctx := context.Background()
 

@@ -24,6 +24,7 @@ import (
 var CollectionManifest = []string{
 	"users",
 	"auth_sessions",
+	"registration_verification_challenges",
 	"companies",
 	"company_members",
 	"clients",
