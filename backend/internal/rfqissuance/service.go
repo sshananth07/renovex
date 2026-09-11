@@ -390,7 +390,31 @@ func (s *Service) IssueVersion(ctx context.Context, companyID, actorUserID strin
 	}
 	if chain.LatestIssuedVersion != 0 || chain.CurrentIssuedVersionID != nil {
 		// Version 1 is the only version sourced directly from M7. Every later
-		// version must come from a reviewed amendment draft.
+		// version must come from a reviewed amendment draft — UNLESS this is
+		// actually a concurrent retry of the SAME operation racing itself:
+		// two callers can both observe chain.LatestIssuedVersion == 0 here
+		// (the chain pointer only advances AFTER the version insert, per
+		// this function's own write-order comment above), so the loser must
+		// not be told "version already exists" as a hard domain conflict —
+		// it must resolve via the identical idempotency recovery the real
+		// CreateVersion collision path below already uses, matching that
+		// path's own established contract ("resolve the winner by operation
+		// ID... a different operation still receives the conflict").
+		existing, found, findErr := s.versions.FindByOperationID(ctx, companyID, input.OperationID)
+		if findErr != nil {
+			return IssuedRFQVersion{}, findErr
+		}
+		if found {
+			snapshot, sourceErr := s.readySnapshotForIssuance(ctx, companyID, input.RFQChainID)
+			if sourceErr != nil {
+				return IssuedRFQVersion{}, sourceErr
+			}
+			if !initialIssuanceMatches(existing, input, snapshot) {
+				return IssuedRFQVersion{}, ErrOperationAlreadyUsed
+			}
+			_, _ = s.ReconcileIssuanceChain(ctx, companyID, actorUserID, input.RFQChainID)
+			return existing, nil
+		}
 		return IssuedRFQVersion{}, ErrVersionAlreadyExists
 	}
 
