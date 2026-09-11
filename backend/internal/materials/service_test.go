@@ -168,9 +168,12 @@ func TestGetReferencePrice(t *testing.T) {
 func TestCreateMaterialFromAISuggestionSetsProvenance(t *testing.T) {
 	svc := materials.NewService(newFakeMaterialRepository())
 	m, err := svc.CreateMaterialFromAISuggestion(context.Background(), "company_a",
-		"Tile Spacers", "tile", "2mm spacers", "bag", 500, "USD", "suggestion_1")
+		"Tile Spacers", "tile", "2mm spacers", "bag", 500, "MYR", "suggestion_1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.ReferencePrice != money.New(500, "MYR") {
+		t.Fatalf("expected reference price 500 MYR, got %+v", m.ReferencePrice)
 	}
 	if m.SourceSuggestionID == nil || *m.SourceSuggestionID != "suggestion_1" {
 		t.Fatalf("expected SourceSuggestionID suggestion_1, got %v", m.SourceSuggestionID)
