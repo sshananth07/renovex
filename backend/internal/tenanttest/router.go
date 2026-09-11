@@ -18,6 +18,7 @@ package tenanttest
 import (
 	"context"
 	"io"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -286,7 +287,7 @@ func BuildRouterAndServicesWithMailerAndAIServiceURL(
 	platformhttp.RegisterHealth(api, nil, "") // health check not exercised by these tests
 	// tenanttest intentionally disables Secure so httptest's plain HTTP client
 	// can exercise the same cookie flow wired by the shipping root.
-	identity.RegisterHandlers(api, services.Auth, int(testRefreshTokenTTL.Seconds()), false, testOrigins)
+	identity.RegisterHandlers(api, services.Auth, int(testRefreshTokenTTL.Seconds()), false, http.SameSiteLaxMode, testOrigins)
 	identity.RegisterRegistrationVerificationHandlers(api, services.RegistrationVerification)
 	supplieraccess.RegisterHandlers(api, services.SupplierAccess, false)
 	rfqissuance.RegisterSupplierHandlers(api, services.RFQIssuance)
