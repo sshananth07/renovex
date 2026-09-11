@@ -140,7 +140,7 @@ func mustDecode(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 // appear in the response body (RP4E0's infrastructure-only invariant).
 func TestAssetGenerationJob_SubmitAndPollOverHTTP(t *testing.T) {
 	_, db := setupRouterWithDatabase(t) // establishes a real Mongo container; the throwaway router here is discarded
-	router, services, err := tenanttest.BuildRouterAndServicesForTest(db)
+	router, services, err := tenanttest.BuildRouterAndServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("unexpected error building router: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestAssetGenerationJob_SubmitAndPollOverHTTP(t *testing.T) {
 // company A's job merely by knowing its ID.
 func TestAssetGenerationJob_CrossCompanyDenied(t *testing.T) {
 	router, db := setupRouterWithDatabase(t)
-	router, services, err := tenanttest.BuildRouterAndServicesForTest(db)
+	router, services, err := tenanttest.BuildRouterAndServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("unexpected error building services: %v", err)
 	}
