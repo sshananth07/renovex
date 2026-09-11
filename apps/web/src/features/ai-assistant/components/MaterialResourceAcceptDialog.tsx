@@ -51,7 +51,7 @@ export function MaterialResourceAcceptDialog({
   onCreateAndAdd,
   onReject,
   submitting,
-  currency = "USD",
+  currency = "MYR",
 }: MaterialResourceAcceptDialogProps) {
   const instanceId = useId();
   const [mode, setMode] = useState<Mode>("review");
