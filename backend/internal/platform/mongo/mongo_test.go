@@ -12,6 +12,9 @@ import (
 )
 
 func TestConnectAndPing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7")

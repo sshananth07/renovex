@@ -28,6 +28,9 @@ import (
 // A standalone MongoDB is reachable but cannot run the transaction the
 // withdrawal boundary requires, so readiness must fail closed.
 func TestReadyFailsClosedWhenTransactionsAreUnsupported(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	// No replica set: pings succeed, transactions do not.
@@ -76,6 +79,9 @@ func TestReadyFailsClosedWhenTransactionsAreUnsupported(t *testing.T) {
 // A transaction-capable replica set is ready, so the probe cannot simply
 // refuse everything.
 func TestReadySucceedsOnATransactionCapableTopology(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
