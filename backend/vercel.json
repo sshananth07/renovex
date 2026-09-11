@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/index.go": {
-      "maxDuration": 60
+      "maxDuration": 120
     }
   },
   "regions": ["sin1"],
