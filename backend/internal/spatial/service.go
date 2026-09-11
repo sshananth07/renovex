@@ -467,6 +467,50 @@ func (s *Service) GetRoomDraft(ctx context.Context, companyID, roomDraftID strin
 	return s.roomDrafts.FindByID(ctx, companyID, roomDraftID)
 }
 
+// FixtureRoomDraftRemoval reports the only fixture-owned records removed by
+// RemoveFixtureRoomDraft. The capture remains intact; only its RoomDraft
+// association is cleared, so cleanup never deletes a capture, Space, or
+// Project.
+type FixtureRoomDraftRemoval struct {
+	CaptureID       string
+	RoomDraftID     string
+	EditRecordCount int64
+}
+
+// RemoveFixtureRoomDraft removes exactly one fixture-produced RoomDraft and
+// its audit records. It first proves the tenant-scoped capture points at the
+// requested draft and that the draft came from the internal fixture provider.
+// The association clear and deletion then happen in one repository
+// transaction; this is intentionally not a generic RoomDraft deletion API.
+func (s *Service) RemoveFixtureRoomDraft(ctx context.Context, companyID, captureID, roomDraftID string) (FixtureRoomDraftRemoval, error) {
+	if s.roomDrafts == nil || s.roomDraftEdits == nil {
+		return FixtureRoomDraftRemoval{}, fmt.Errorf("spatial: room draft cleanup support is not configured")
+	}
+	capture, err := s.captures.FindByID(ctx, companyID, captureID)
+	if err != nil {
+		return FixtureRoomDraftRemoval{}, err
+	}
+	if capture.RoomDraftID != roomDraftID {
+		return FixtureRoomDraftRemoval{}, ErrFixtureRoomDraftNotRemovable
+	}
+	draft, err := s.roomDrafts.FindByID(ctx, companyID, roomDraftID)
+	if err != nil {
+		return FixtureRoomDraftRemoval{}, err
+	}
+	if draft.CaptureID != captureID || draft.SourceProvider != SourceProviderFixture {
+		return FixtureRoomDraftRemoval{}, ErrFixtureRoomDraftNotRemovable
+	}
+	cleaner, ok := s.roomDraftEdits.(FixtureRoomDraftCleanupRepository)
+	if !ok {
+		return FixtureRoomDraftRemoval{}, fmt.Errorf("spatial: room draft edit repository %T does not support fixture cleanup", s.roomDraftEdits)
+	}
+	editRecordCount, err := cleaner.DeleteFixtureRoomDraft(ctx, companyID, captureID, roomDraftID)
+	if err != nil {
+		return FixtureRoomDraftRemoval{}, err
+	}
+	return FixtureRoomDraftRemoval{CaptureID: captureID, RoomDraftID: roomDraftID, EditRecordCount: editRecordCount}, nil
+}
+
 // GetRoomDraftByCapture returns captureID's RoomDraft, tenant-scoped to
 // companyID — the "Continue Review loads the SAME persisted draft" lookup
 // (plan §RP3): callers use this instead of ever creating a second draft for
