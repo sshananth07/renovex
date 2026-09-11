@@ -24,6 +24,9 @@ import (
 // rather than setupRouterWithMail's router-only return.
 func newTestMongoDatabase(t *testing.T) *mongo.Database {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
@@ -54,7 +57,7 @@ func newTestMongoDatabase(t *testing.T) *mongo.Database {
 func buildDesignTestRouter(t *testing.T) (http.Handler, *composition.Services, *mongo.Database) {
 	t.Helper()
 	db := newTestMongoDatabase(t)
-	router, services, err := tenanttest.BuildRouterAndServicesForTest(db)
+	router, services, err := tenanttest.BuildRouterAndServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("building router and services: %v", err)
 	}
@@ -300,7 +303,7 @@ func TestSpatialDesignReasoning_MaterialOnlyRefinement(t *testing.T) {
 	// graph against the same database (safe here — ListTurns/FindSession
 	// are pure Mongo reads, not in-memory mutation) and confirm both turns
 	// are still there in order.
-	freshServices, err := tenanttest.BuildServicesForTest(db)
+	freshServices, err := tenanttest.BuildServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("rebuilding services: %v", err)
 	}
