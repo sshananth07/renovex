@@ -102,6 +102,9 @@ export function useCreateDesignTurn(sessionId: string) {
   return useMutation({
     mutationFn: (body: CreateDesignTurnInput) => createSpatialDesignTurn(sessionId, body),
     retry: false,
+    onMutate: async () => {
+      await queryClient.invalidateQueries({ queryKey: designTurnsQueryKey(sessionId) });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: designTurnsQueryKey(sessionId) });
     },
