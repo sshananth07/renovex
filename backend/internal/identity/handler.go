@@ -66,7 +66,7 @@ type logoutOutput struct {
 // still applies at the transport layer for browser callers, but the origin
 // guard here is specifically about protecting cookie-based session
 // mutation, per platformhttp.DecideOriginGuard's contract).
-func RegisterHandlers(api huma.API, authSvc *AuthService, refreshCookieMaxAge int, secureRefreshCookie bool, allowedOrigins config.AllowedOrigins) {
+func RegisterHandlers(api huma.API, authSvc *AuthService, refreshCookieMaxAge int, secureRefreshCookie bool, refreshCookieSameSite http.SameSite, allowedOrigins config.AllowedOrigins) {
 	huma.Register(api, huma.Operation{
 		OperationID: "auth-register",
 		Method:      http.MethodPost,
@@ -77,7 +77,7 @@ func RegisterHandlers(api huma.API, authSvc *AuthService, refreshCookieMaxAge in
 		if err != nil {
 			return nil, mapAuthError(err)
 		}
-		return buildAuthOutput(result, refreshCookieMaxAge, secureRefreshCookie), nil
+		return buildAuthOutput(result, refreshCookieMaxAge, secureRefreshCookie, refreshCookieSameSite), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -90,7 +90,7 @@ func RegisterHandlers(api huma.API, authSvc *AuthService, refreshCookieMaxAge in
 		if err != nil {
 			return nil, mapAuthError(err)
 		}
-		return buildAuthOutput(result, refreshCookieMaxAge, secureRefreshCookie), nil
+		return buildAuthOutput(result, refreshCookieMaxAge, secureRefreshCookie, refreshCookieSameSite), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -105,10 +105,10 @@ func RegisterHandlers(api huma.API, authSvc *AuthService, refreshCookieMaxAge in
 		result, err := authSvc.Refresh(ctx, input.RefreshToken.Value)
 		if err != nil {
 			resp := &authOutput{}
-			resp.SetCookie = expiredRefreshCookie(secureRefreshCookie)
+			resp.SetCookie = expiredRefreshCookie(secureRefreshCookie, refreshCookieSameSite)
 			return resp, mapAuthError(err)
 		}
-		return buildAuthOutput(result, refreshCookieMaxAge, secureRefreshCookie), nil
+		return buildAuthOutput(result, refreshCookieMaxAge, secureRefreshCookie, refreshCookieSameSite), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -121,7 +121,7 @@ func RegisterHandlers(api huma.API, authSvc *AuthService, refreshCookieMaxAge in
 			return nil, huma.Error403Forbidden("origin not permitted")
 		}
 		_ = authSvc.Logout(ctx, input.RefreshToken.Value) // idempotent from caller's view
-		return &logoutOutput{SetCookie: expiredRefreshCookie(secureRefreshCookie)}, nil
+		return &logoutOutput{SetCookie: expiredRefreshCookie(secureRefreshCookie, refreshCookieSameSite)}, nil
 	})
 }
 
@@ -198,7 +198,7 @@ func mapRegistrationVerificationError(err error) error {
 	}
 }
 
-func buildAuthOutput(result AuthResult, maxAge int, secure bool) *authOutput {
+func buildAuthOutput(result AuthResult, maxAge int, secure bool, sameSite http.SameSite) *authOutput {
 	resp := &authOutput{}
 	resp.Body.AccessToken = result.AccessToken
 	resp.Body.MustChangePassword = result.MustChangePassword
@@ -208,20 +208,20 @@ func buildAuthOutput(result AuthResult, maxAge int, secure bool) *authOutput {
 		HttpOnly: true,
 		Secure:   secure,
 		Path:     "/auth",
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		MaxAge:   maxAge,
 	}
 	return resp
 }
 
-func expiredRefreshCookie(secure bool) http.Cookie {
+func expiredRefreshCookie(secure bool, sameSite http.SameSite) http.Cookie {
 	return http.Cookie{
 		Name:     refreshCookieName,
 		Value:    "",
 		HttpOnly: true,
 		Secure:   secure,
 		Path:     "/auth",
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	}
