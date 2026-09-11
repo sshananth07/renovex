@@ -74,6 +74,9 @@ func acceptanceTestConfig() config.Config {
 // requires one, matching every other real-Mongo test in this package).
 func buildTestServices(t *testing.T) (*composition.Services, *mongo.Database) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: requires Docker/testcontainers; run without -short")
+	}
 	ctx := context.Background()
 
 	container, err := mongodb.Run(ctx, "mongo:7", mongodb.WithReplicaSet("rs0"))
