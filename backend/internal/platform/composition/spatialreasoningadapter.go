@@ -86,9 +86,9 @@ func toSpatialReasoningRequest(c spatial.DesignReasoningContext) platformai.Spat
 
 	return platformai.SpatialReasoningRequest{
 		SchemaVersion:     1,
-		TurnID:            "", // set by the caller (design service) if/when needed for logging correlation only — not trusted input either way
-		RoomDraftID:       "",
-		RoomDraftRevision: 0,
+		TurnID:            c.TurnID,
+		RoomDraftID:       c.RoomDraftID,
+		RoomDraftRevision: c.RoomDraftRevision,
 		SelectedElement: platformai.SpatialSelectedElement{
 			Kind: string(c.Target.Kind), ID: c.Target.ID, Category: c.Target.Category,
 			Transform:        toSpatialTransform(c.Target.Transform),
