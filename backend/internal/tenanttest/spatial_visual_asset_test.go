@@ -59,7 +59,7 @@ func doRawGet(t *testing.T, router http.Handler, path string) *httptest.Response
 // exactly what was published.
 func TestVisualAssetAccess_FullLifecycleOverHTTP(t *testing.T) {
 	router, db := setupRouterWithDatabase(t)
-	services, err := tenanttest.BuildServicesForTest(db)
+	services, err := tenanttest.BuildServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("unexpected error building services: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestVisualAssetAccess_FullLifecycleOverHTTP(t *testing.T) {
 // principal, never from anything the caller supplies.
 func TestVisualAssetAccess_CrossCompanyDenied(t *testing.T) {
 	router, db := setupRouterWithDatabase(t)
-	services, err := tenanttest.BuildServicesForTest(db)
+	services, err := tenanttest.BuildServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("unexpected error building services: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestVisualAssetAccess_CrossCompanyDenied(t *testing.T) {
 // not merely by a well-formed-looking query parameter.
 func TestVisualAssetAccess_ContentEndpointRejectsTamperedCapability(t *testing.T) {
 	router, db := setupRouterWithDatabase(t)
-	services, err := tenanttest.BuildServicesForTest(db)
+	services, err := tenanttest.BuildServicesForTest(t, db)
 	if err != nil {
 		t.Fatalf("unexpected error building services: %v", err)
 	}
