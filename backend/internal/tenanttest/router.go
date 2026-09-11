@@ -18,6 +18,8 @@ package tenanttest
 import (
 	"context"
 	"io"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -97,8 +99,8 @@ const (
 // Milestone 2 modules, all three Milestone 3 modules, and the Milestone 4
 // estimates module — against db, mirroring cmd/api/main.go's composition
 // root exactly (construction order, EnsureIndexes calls, route mounting).
-func BuildRouter(db *mongo.Database) (chi.Router, error) {
-	return BuildRouterWithMailer(db, nil)
+func BuildRouter(t *testing.T, db *mongo.Database) (chi.Router, error) {
+	return BuildRouterWithMailer(t, db, nil)
 }
 
 // BuildRouterAndServicesForTest is BuildRouter plus the underlying
@@ -106,8 +108,8 @@ func BuildRouter(db *mongo.Database) (chi.Router, error) {
 // registered against — see
 // BuildRouterAndServicesWithMailerAndAIServiceURL's doc comment for why
 // this differs from BuildServicesForTest.
-func BuildRouterAndServicesForTest(db *mongo.Database) (chi.Router, *composition.Services, error) {
-	return BuildRouterAndServicesWithMailerAndAIServiceURL(db, nil, "")
+func BuildRouterAndServicesForTest(t *testing.T, db *mongo.Database) (chi.Router, *composition.Services, error) {
+	return BuildRouterAndServicesWithMailerAndAIServiceURL(t, db, nil, "")
 }
 
 // BuildServicesForTest constructs the SAME composition.Services graph
@@ -116,10 +118,10 @@ func BuildRouterAndServicesForTest(db *mongo.Database) (chi.Router, *composition
 // (e.g. RP4D's Service.PublishVisualAssetVersion, which has no public HTTP
 // route by design) against the SAME database a router built from db serves
 // requests against.
-func BuildServicesForTest(db *mongo.Database) (*composition.Services, error) {
+func BuildServicesForTest(t *testing.T, db *mongo.Database) (*composition.Services, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return composition.BuildServices(ctx, testConfig(""), zerolog.New(io.Discard), db)
+	return composition.BuildServices(ctx, testConfig(t, ""), zerolog.New(io.Discard), db)
 }
 
 // BuildRouterWithMailer wires the same composition root but lets a test supply
@@ -137,8 +139,41 @@ func BuildServicesForTest(db *mongo.Database) (*composition.Services, error) {
 // with a typed service-unavailable error, never a panic. Suites that need a
 // real or stubbed ai-service use BuildRouterWithMailerAndAIServiceURL.
 func BuildRouterWithMailer(
-	db *mongo.Database, mailer mail.EmailSender) (chi.Router, error) {
-	return BuildRouterWithMailerAndAIServiceURL(db, mailer, "")
+	t *testing.T, db *mongo.Database, mailer mail.EmailSender) (chi.Router, error) {
+	return BuildRouterWithMailerAndAIServiceURL(t, db, mailer, "")
+}
+
+var (
+	sharedTestStorageRootsMu sync.Mutex
+	sharedTestStorageRoots   = map[*testing.T]string{}
+)
+
+// sharedTestStorageRoot returns the ONE t.TempDir() this test uses for
+// every composition.Services/router it builds, lazily creating it on first
+// use. A test that independently builds more than one Services graph for
+// the same t (e.g. BuildServicesForTest alongside a router from
+// setupRouterWithDatabase — see spatial_visual_asset_test.go's own "the
+// SAME object graph" doc comment) needs them to share one local object
+// store root, or content published through one graph is invisible to the
+// other's content-serving route. t.TempDir() itself still owns deleting
+// the directory (via its own t.Cleanup); this map only stops a SECOND call
+// for the same t from generating a SECOND, different directory. Different
+// *testing.T values (including subtests) naturally get different roots.
+func sharedTestStorageRoot(t *testing.T) string {
+	t.Helper()
+	sharedTestStorageRootsMu.Lock()
+	defer sharedTestStorageRootsMu.Unlock()
+	if dir, ok := sharedTestStorageRoots[t]; ok {
+		return dir
+	}
+	dir := t.TempDir()
+	sharedTestStorageRoots[t] = dir
+	t.Cleanup(func() {
+		sharedTestStorageRootsMu.Lock()
+		defer sharedTestStorageRootsMu.Unlock()
+		delete(sharedTestStorageRoots, t)
+	})
+	return dir
 }
 
 // testConfig builds the fixed config.Config tenant tests pass to
@@ -148,13 +183,22 @@ func BuildRouterWithMailer(
 // directly into individual service constructors; consolidating them into a
 // config.Config is what lets this package delegate to the one canonical
 // composition root instead of maintaining its own.
-func testConfig(aiServiceURL string) config.Config {
+//
+// StorageLocalPath uses sharedTestStorageRoot(t) — never a bare "" (which
+// composition's object-store adapters would then resolve as absolute paths
+// like "/spatial-artifacts" off the filesystem root, unwritable on a CI
+// runner) — writable, cleaned up automatically, and shared across every
+// testConfig(t, ...) call for the same t (see sharedTestStorageRoot's own
+// doc comment for why that sharing matters).
+func testConfig(t *testing.T, aiServiceURL string) config.Config {
+	t.Helper()
 	return config.Config{
 		AppEnv:           "test",
 		JWTAccessSecret:  testJWTSecret,
 		SMTPHost:         "localhost",
 		SMTPPort:         "1025",
 		SMTPFrom:         "no-reply@test.local",
+		StorageLocalPath: sharedTestStorageRoot(t),
 		AIServiceURL:     aiServiceURL,
 		AIInternalToken:  TestAIInternalToken,
 		AIServiceTimeout: 10 * time.Second,
@@ -188,8 +232,8 @@ func testConfig(aiServiceURL string) config.Config {
 // TestAIInternalToken. An empty aiServiceURL matches BuildRouterWithMailer's
 // unconfigured behavior exactly.
 func BuildRouterWithMailerAndAIServiceURL(
-	db *mongo.Database, mailer mail.EmailSender, aiServiceURL string) (chi.Router, error) {
-	router, _, err := BuildRouterAndServicesWithMailerAndAIServiceURL(db, mailer, aiServiceURL)
+	t *testing.T, db *mongo.Database, mailer mail.EmailSender, aiServiceURL string) (chi.Router, error) {
+	router, _, err := BuildRouterAndServicesWithMailerAndAIServiceURL(t, db, mailer, aiServiceURL)
 	return router, err
 }
 
@@ -207,12 +251,12 @@ func BuildRouterWithMailerAndAIServiceURL(
 // PublishVisualAssetVersion) but wrong for mutating in-memory Service
 // struct fields a router elsewhere already captured a pointer to.
 func BuildRouterAndServicesWithMailerAndAIServiceURL(
-	db *mongo.Database, mailer mail.EmailSender, aiServiceURL string) (chi.Router, *composition.Services, error) {
+	t *testing.T, db *mongo.Database, mailer mail.EmailSender, aiServiceURL string) (chi.Router, *composition.Services, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	logger := zerolog.New(io.Discard)
-	cfg := testConfig(aiServiceURL)
+	cfg := testConfig(t, aiServiceURL)
 
 	// mailer overrides composition.BuildServices's own SMTP sender when a
 	// test supplies one (e.g. a fake mail.EmailSender that records sent
