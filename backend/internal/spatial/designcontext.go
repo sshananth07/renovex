@@ -46,6 +46,12 @@ type DesignContextNeighbor struct {
 // keys, credentials, or the full RoomDraft — only geometry Python needs to
 // reason about the selected target's immediate surroundings.
 type DesignReasoningContext struct {
+	// These identifiers are copied from authoritative server state, never
+	// supplied by the browser. Python validates them before provider selection
+	// and uses TurnID as the safe cross-service correlation key.
+	TurnID                    string
+	RoomDraftID               string
+	RoomDraftRevision         int64
 	Target                    AuthorizedDesignTarget
 	Walls                     []DesignContextWall
 	Neighbors                 []DesignContextNeighbor
@@ -155,6 +161,7 @@ func buildDesignReasoningContext(draft RoomDraft, target AuthorizedDesignTarget,
 	}
 
 	return DesignReasoningContext{
+		RoomDraftID: draft.ID, RoomDraftRevision: draft.Revision,
 		Target: target, Walls: walls, Neighbors: neighbors,
 		CurrentWorkingDesign: workingDesign, LastSuccessfulPlanSummary: lastSuccessfulPlanSummary,
 		Instruction: instruction,
