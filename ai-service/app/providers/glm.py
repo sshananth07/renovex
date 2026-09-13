@@ -258,6 +258,58 @@ def _log_post_success_shape(request_turn_id: str, attempt: int, body: object) ->
     )
 
 
+def _log_empty_content_diagnostic(request_turn_id: str, attempt: int, body: object) -> None:
+    """Root-cause instrumentation ONLY for the empty_content branch
+    specifically (no behavior change): pins the exact fields needed to
+    confirm or rule out the "thinking budget exhausted max_tokens" root-
+    cause hypothesis — finish_reason, whether content/reasoning_content
+    were present, their LENGTHS only (never their values), tool_calls
+    presence, and completion/total token counts. Deliberately separate
+    from _log_post_success_shape (which already logs a superset of this on
+    every 200) so this one exact branch's diagnostic is self-contained
+    and easy to grep for in isolation. Never logs the response body,
+    content, reasoning_content, prompts, RoomDraft, API key, or
+    Authorization header — none of those are read here at all."""
+    choices = body.get("choices") if isinstance(body, dict) else None
+    choices_count = len(choices) if isinstance(choices, list) else None
+    first_choice = choices[0] if isinstance(choices, list) and choices else None
+
+    message = first_choice.get("message") if isinstance(first_choice, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    content_present = bool(content)
+    content_length = len(content) if isinstance(content, (str, list, dict)) else 0
+
+    reasoning_content = message.get("reasoning_content") if isinstance(message, dict) else None
+    reasoning_content_present = bool(reasoning_content)
+    reasoning_content_length = len(reasoning_content) if isinstance(reasoning_content, (str, list, dict)) else 0
+
+    tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+    tool_calls_present = bool(tool_calls)
+
+    finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
+
+    usage = body.get("usage") if isinstance(body, dict) else None
+    completion_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+    total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+
+    logger.warning(
+        "glm_spatial_empty_content_diagnostic turn_id=%s attempt=%d finish_reason=%s choices_count=%s "
+        "content_present=%s content_length=%s reasoning_content_present=%s reasoning_content_length=%s "
+        "tool_calls_present=%s completion_tokens=%s total_tokens=%s",
+        request_turn_id,
+        attempt,
+        finish_reason,
+        choices_count,
+        content_present,
+        content_length,
+        reasoning_content_present,
+        reasoning_content_length,
+        tool_calls_present,
+        completion_tokens,
+        total_tokens,
+    )
+
+
 def _log_provider_rejected(
     request_turn_id: str,
     response: httpx.Response,
@@ -335,6 +387,7 @@ class GLMProvider:
         _log_post_success_shape(request.turnId, attempt, body)
         if not content:
             _log_post_success_failure_stage(request.turnId, attempt, "empty_content", None)
+            _log_empty_content_diagnostic(request.turnId, attempt, body)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output")
 
         try:
