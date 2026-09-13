@@ -145,6 +145,54 @@ def _safe_provider_error_fields(response: httpx.Response) -> tuple[str | None, s
     return provider_code, provider_message, retry_after, provider_request_id
 
 
+def _safe_validation_error_locations(exc: ValidationError) -> list[str]:
+    """Extracts ONLY dotted field-location paths from a Pydantic
+    ValidationError — e.g. "spatial.spec.kind" — never the error type,
+    message text, or (critically) the "input" key each error carries,
+    which embeds the actual offending value from the response content.
+    Bounded to 20 entries so a pathological error list cannot inflate a
+    single log line unboundedly."""
+    locations: list[str] = []
+    for err in exc.errors():
+        loc = err.get("loc")
+        if isinstance(loc, (list, tuple)):
+            locations.append(".".join(str(part) for part in loc))
+        if len(locations) >= 20:
+            break
+    return locations
+
+
+def _log_post_success_failure_stage(
+    request_turn_id: str,
+    attempt: int,
+    stage: str,
+    exc: Exception | None,
+) -> None:
+    """Root-cause diagnostic ONLY (no behavior change): every post-200
+    parsing/validation failure inside reason_element currently raises the
+    SAME InvalidProviderResponse, with no way to tell from logs which of
+    the five local stages actually failed. This logs turn id, attempt,
+    the stage name, and the exception's CLASS NAME only — never
+    str(exc)/repr(exc), since several of these exception types (KeyError,
+    IndexError, json.JSONDecodeError) can embed a fragment of the actual
+    response content in their message. For a Pydantic ValidationError
+    specifically, only field-location paths are logged (never its full
+    errors() objects, which carry the offending input value) — see
+    _safe_validation_error_locations. Never logs the response body,
+    prompt, RoomDraft, API key, or Authorization header — none of those
+    are read here at all."""
+    exception_type = type(exc).__name__ if exc is not None else None
+    field_locations = _safe_validation_error_locations(exc) if isinstance(exc, ValidationError) else None
+    logger.warning(
+        "glm_spatial_post_success_failure turn_id=%s attempt=%d stage=%s exception_type=%s field_locations=%s",
+        request_turn_id,
+        attempt,
+        stage,
+        exception_type,
+        field_locations,
+    )
+
+
 def _log_provider_rejected(
     request_turn_id: str,
     response: httpx.Response,
@@ -211,30 +259,35 @@ class GLMProvider:
         return self.reason_element(request)
 
     def reason_element(self, request: SpatialReasoningRequest) -> SpatialReasoningResult:
-        response = self._post_with_bounded_overload_retry(request)
+        response, attempt = self._post_with_bounded_overload_retry(request)
 
         try:
             body = response.json()
             content = body["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError, ValueError):
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            _log_post_success_failure_stage(request.turnId, attempt, "envelope_extraction", exc)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
         if not content:
+            _log_post_success_failure_stage(request.turnId, attempt, "empty_content", None)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output")
 
         try:
             parsed = json.loads(content)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            _log_post_success_failure_stage(request.turnId, attempt, "content_json_decode", exc)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
 
         try:
             delta = ProposedSceneEditDelta(**parsed)
-        except ValidationError:
+        except ValidationError as exc:
+            _log_post_success_failure_stage(request.turnId, attempt, "schema_validation", exc)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
 
         # Cross-check: the model must echo back the SAME target it was
         # given — never trust the model to have understood which element it
         # was reasoning about (RP4E1 plan "design_plan_target_mismatch").
         if delta.target.kind != request.selectedElement.kind or delta.target.id != request.selectedElement.id:
+            _log_post_success_failure_stage(request.turnId, attempt, "target_mismatch", None)
             raise InvalidProviderResponse("spatial reasoning provider returned a mismatched target")
 
         return SpatialReasoningResult(
@@ -245,7 +298,7 @@ class GLMProvider:
             schemaVersion=1,
         )
 
-    def _post_with_bounded_overload_retry(self, request: SpatialReasoningRequest) -> httpx.Response:
+    def _post_with_bounded_overload_retry(self, request: SpatialReasoningRequest) -> tuple[httpx.Response, int]:
         """Makes the outbound POST, retrying ONLY on Z.ai's own transient-
         overload signal (HTTP 429, error.code=="1305") — up to _MAX_ATTEMPTS
         total attempts. Every other outcome (success, a different 429
@@ -257,12 +310,14 @@ class GLMProvider:
         response. The same SpatialReasoningRequest/turn/payload is reused
         for every attempt — no new DesignTurn, session, or request context
         is created; this loop is invisible to Go, which still sees one
-        ReasonElement call."""
+        ReasonElement call. Returns (response, winning_attempt_number) so
+        callers can attribute diagnostics to the attempt that actually
+        produced the response being parsed, rather than assuming attempt 1."""
         last_overload_response: httpx.Response | None = None
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             response, retryable_overload = self._post_once(request, attempt)
             if not retryable_overload:
-                return response
+                return response, attempt
             last_overload_response = response
             if attempt < _MAX_ATTEMPTS:
                 retry_after = response.headers.get("retry-after")
