@@ -148,9 +148,8 @@ def test_429_rejection_logs_safe_provider_diagnostics(caplog):
         )
 
     provider = _provider_with_transport(handler)
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(ProviderRateLimited):
-            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+    with caplog.at_level(logging.WARNING), pytest.raises(ProviderRateLimited):
+        provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
 
     assert "glm_spatial_provider_rejected" in caplog.text
     assert "http_status=429" in caplog.text
@@ -173,9 +172,8 @@ def test_429_with_non_dict_error_shape_logs_safely_without_crashing(caplog):
         return httpx.Response(429, json={"error": "rate limited"})
 
     provider = _provider_with_transport(handler)
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(ProviderRateLimited):
-            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+    with caplog.at_level(logging.WARNING), pytest.raises(ProviderRateLimited):
+        provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
 
     assert "glm_spatial_provider_rejected" in caplog.text
     assert "http_status=429" in caplog.text
