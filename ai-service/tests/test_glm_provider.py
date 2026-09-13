@@ -6,6 +6,7 @@ fails Pydantic validation before any HTTP call) must make ZERO outbound
 calls."""
 
 import json
+import logging
 
 import httpx
 import pytest
@@ -130,6 +131,56 @@ def test_429_maps_to_provider_rate_limited_single_attempt():
     with pytest.raises(ProviderRateLimited):
         provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
     assert counter.count == 1
+
+
+def test_429_rejection_logs_safe_provider_diagnostics(caplog):
+    """The diagnostics-only fix: a non-2xx (429) response must safely log
+    HTTP status, Z.ai's own error.code/error.message, Retry-After, and a
+    provider request id — never the API key, Authorization header, prompt,
+    or RoomDraft/context payload. Z.ai's documented error shape is
+    {"error": {"code": ..., "message": ...}}."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            headers={"retry-after": "30", "x-request-id": "req_abc123"},
+            json={"error": {"code": "1302", "message": "Rate limit reached for requests"}},
+        )
+
+    provider = _provider_with_transport(handler)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ProviderRateLimited):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+    assert "glm_spatial_provider_rejected" in caplog.text
+    assert "http_status=429" in caplog.text
+    assert "provider_code=1302" in caplog.text
+    assert "Rate limit reached for requests" in caplog.text
+    assert "retry_after=30" in caplog.text
+    assert "req_abc123" in caplog.text
+    assert "test-glm-key" not in caplog.text
+    assert "Bearer" not in caplog.text
+    assert FIXTURE_REQUEST["instruction"] not in caplog.text
+
+
+def test_429_with_non_dict_error_shape_logs_safely_without_crashing(caplog):
+    """Existing test_429_maps_to_provider_rate_limited_single_attempt uses a
+    plain string "error" field (not Z.ai's real {"code","message"} shape) —
+    the new diagnostics must degrade to unset fields rather than raising on
+    an unexpected/malformed error body."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "rate limited"})
+
+    provider = _provider_with_transport(handler)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ProviderRateLimited):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+    assert "glm_spatial_provider_rejected" in caplog.text
+    assert "http_status=429" in caplog.text
+    assert "provider_code=None" in caplog.text
+    assert "provider_message=None" in caplog.text
 
 
 def test_5xx_maps_to_provider_unavailable_single_attempt():
