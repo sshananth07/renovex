@@ -1,9 +1,11 @@
-"""GLM-5.3 provider tests. Non-retrying: every failure mode (429, 5xx,
-timeout, redirect, truncated/missing content, invalid JSON, invalid schema)
-must result in EXACTLY ONE outbound HTTP attempt — never a retry, repair, or
-fallback (RP4E1 plan Task 3 Step 1). Invalid LOCAL input (a request that
-fails Pydantic validation before any HTTP call) must make ZERO outbound
-calls."""
+"""GLM-5.3 provider tests. Non-retrying for almost every failure mode (a
+different 429 reason, 5xx, timeout, redirect, truncated/missing content,
+invalid JSON, invalid schema) — EXACTLY ONE outbound HTTP attempt, never a
+retry, repair, or fallback (RP4E1 plan Task 3 Step 1). Invalid LOCAL input
+(a request that fails Pydantic validation before any HTTP call) must make
+ZERO outbound calls. The ONE exception is Z.ai's own transient-overload
+signal (HTTP 429, error.code=="1305"), which retries up to twice more (3
+attempts total, bounded backoff) — see the retry-specific tests below."""
 
 import json
 import logging
@@ -18,7 +20,7 @@ from app.errors import (
     ProviderTimeout,
     ProviderUnavailable,
 )
-from app.providers.glm import GLMProvider
+from app.providers.glm import _BACKOFF_JITTER_SECONDS, GLMProvider
 from app.schemas.spatial_reasoning import SpatialReasoningRequest
 
 FIXTURE_REQUEST = {
@@ -179,6 +181,188 @@ def test_429_with_non_dict_error_shape_logs_safely_without_crashing(caplog):
     assert "http_status=429" in caplog.text
     assert "provider_code=None" in caplog.text
     assert "provider_message=None" in caplog.text
+
+
+def _overload_response(retry_after: str | None = None) -> httpx.Response:
+    headers = {"retry-after": retry_after} if retry_after is not None else {}
+    return httpx.Response(
+        429,
+        headers=headers,
+        json={"error": {"code": "1305", "message": "The service may be temporarily overloaded, please try again later"}},
+    )
+
+
+class TestTransientOverloadRetry:
+    """RP4E1 amendment: HTTP 429 with error.code=="1305" (Z.ai's own
+    transient-overload signal) retries up to twice more (3 attempts total,
+    ~1s then ~2s backoff plus jitter, or Retry-After if present) — the ONE
+    exception to this provider's otherwise-exactly-one-attempt rule. Every
+    test here patches time.sleep so the bounded backoff never actually
+    slows the suite down."""
+
+    def test_1305_then_200_succeeds_after_one_retry(self, monkeypatch):
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: sleep_calls.append(s))
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            if counter.count == 1:
+                return _overload_response()
+            return _chat_completions_response(json.dumps(VALID_DELTA))
+
+        provider = _provider_with_transport(handler)
+        result = provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert counter.count == 2
+        assert result.delta.target.id == "object_sofa_123"
+        assert len(sleep_calls) == 1
+        assert 1.0 <= sleep_calls[0] <= 1.0 + _BACKOFF_JITTER_SECONDS + 1e-6
+
+    def test_1305_1305_then_200_succeeds_after_two_retries(self, monkeypatch):
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: sleep_calls.append(s))
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            if counter.count <= 2:
+                return _overload_response()
+            return _chat_completions_response(json.dumps(VALID_DELTA))
+
+        provider = _provider_with_transport(handler)
+        result = provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert counter.count == 3
+        assert result.delta.target.id == "object_sofa_123"
+        assert len(sleep_calls) == 2
+        assert 1.0 <= sleep_calls[0] <= 1.0 + _BACKOFF_JITTER_SECONDS + 1e-6
+        assert 2.0 <= sleep_calls[1] <= 2.0 + _BACKOFF_JITTER_SECONDS + 1e-6
+
+    def test_1305_three_times_exhausts_retries_and_raises_provider_rate_limited(self, monkeypatch, caplog):
+        """All attempts exhausted with the transient-overload signal every
+        time must still raise ProviderRateLimited — the SAME exception a
+        single non-retried 429 always raised — so Go's existing
+        needs_attention/design_reasoning_provider_rejected terminal
+        classification is completely unchanged; only the number of
+        attempts before reaching it grew."""
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: None)
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            return _overload_response()
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(ProviderRateLimited):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert counter.count == 3
+        assert caplog.text.count("provider_code=1305") == 3
+
+    def test_quota_style_429_does_not_retry(self, monkeypatch):
+        """A DIFFERENT error.code at the same HTTP 429 (e.g. a quota/
+        balance/entitlement rejection) must never retry — retrying cannot
+        help against an exhausted quota and must not burn extra attempts."""
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: sleep_calls.append(s))
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            return httpx.Response(429, json={"error": {"code": "1113", "message": "Insufficient balance"}})
+
+        provider = _provider_with_transport(handler)
+        with pytest.raises(ProviderRateLimited):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert counter.count == 1
+        assert sleep_calls == []
+
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_401_and_403_do_not_retry(self, monkeypatch, status):
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: sleep_calls.append(s))
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            return httpx.Response(status, json={"error": {"code": "auth_error", "message": "unauthorized"}})
+
+        provider = _provider_with_transport(handler)
+        with pytest.raises(ProviderUnavailable):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert counter.count == 1
+        assert sleep_calls == []
+
+    def test_malformed_200_response_does_not_trigger_provider_retry(self, monkeypatch):
+        """A 200 with unparseable/invalid structured content is a LOCAL
+        (Go-independent) validation failure on the single response already
+        received — it must never re-enter the HTTP retry loop, since the
+        overload retry exists only for the transport/429-overload step,
+        never for output validation."""
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: sleep_calls.append(s))
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            return _chat_completions_response("not valid json {{{")
+
+        provider = _provider_with_transport(handler)
+        with pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert counter.count == 1
+        assert sleep_calls == []
+
+    def test_retry_after_header_takes_precedence_over_fixed_backoff(self, monkeypatch):
+        sleep_calls: list[float] = []
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: sleep_calls.append(s))
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            if counter.count == 1:
+                return _overload_response(retry_after="5")
+            return _chat_completions_response(json.dumps(VALID_DELTA))
+
+        provider = _provider_with_transport(handler)
+        provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert len(sleep_calls) == 1
+        assert sleep_calls[0] == 5.0
+
+    def test_retry_diagnostics_log_safe_fields_per_attempt(self, monkeypatch, caplog):
+        monkeypatch.setattr("app.providers.glm.time.sleep", lambda s: None)
+
+        counter = _CallCounter()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.count += 1
+            if counter.count == 1:
+                return _overload_response()
+            return _chat_completions_response(json.dumps(VALID_DELTA))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "turn_id=turn_002" in caplog.text
+        assert "attempt=1" in caplog.text
+        assert "attempt=2" in caplog.text
+        assert "provider_code=1305" in caplog.text
+        assert "retry_delay_ms=" in caplog.text
+        assert "test-glm-key" not in caplog.text
+        assert "Bearer" not in caplog.text
+        assert FIXTURE_REQUEST["instruction"] not in caplog.text
 
 
 def test_5xx_maps_to_provider_unavailable_single_attempt():

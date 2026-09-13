@@ -1,9 +1,22 @@
 """GLMProvider: the only place that talks to Z.AI's GLM-5.3 chat-completions
 API for RP4E1 spatial reasoning. Deliberately separate from GeminiProvider
 and its bounded-retry helper (gemini.py) — RP4E1 makes AT MOST ONE outbound
-attempt per turn, never retries, never repairs, never falls back to another
-model (RP4E1 plan's global constraints). Redirects and transport-level
-retries are disabled explicitly rather than relying on httpx defaults.
+attempt per turn for every failure EXCEPT one narrow, explicitly bounded
+exception: Z.ai's own transient-overload signal (HTTP 429 with
+error.code=="1305", "The service may be temporarily overloaded, please try
+again later"). That one case retries up to twice more (3 attempts total,
+short backoff) since it is Z.ai telling us the request was never actually
+rejected on its merits — every other failure (a different 429 reason,
+4xx/5xx, timeout, transport error, invalid output) still makes exactly one
+attempt, never repairs, never falls back to another model. Redirects and
+transport-level retries are disabled explicitly rather than relying on
+httpx defaults.
+
+The retry loop lives entirely inside this one reason_element call — Go's
+design_service.go still sees exactly one ReasonElement invocation per
+durable turn, so its at-most-once dispatch guarantee, turn/session
+identity, and RoomDraft state are all completely unaffected; no new
+DesignTurn, session, or RoomDraft mutation is ever created here.
 
 reasoning_content (GLM's chain-of-thought field, when present) is read only
 to be discarded — it must never reach a prompt, log, or public DTO (RP4E1
@@ -13,6 +26,7 @@ logged").
 
 import json
 import logging
+import random
 import time
 from urllib.parse import urlparse
 
@@ -38,6 +52,46 @@ from app.schemas.spatial_reasoning import (
 
 _RETRYABLE_SERVER_STATUS_CODES = {500, 502, 503, 504}
 logger = logging.getLogger(__name__)
+
+# Z.ai's own transient-overload error code (as opposed to a quota/balance/
+# entitlement rejection, which is also surfaced as HTTP 429 but with a
+# DIFFERENT error.code and must never be retried — retrying a quota
+# exhaustion cannot help and only burns another attempt against the same
+# limit). Only this one code, at this one HTTP status, is retryable.
+_TRANSIENT_OVERLOAD_PROVIDER_CODE = "1305"
+_TRANSIENT_OVERLOAD_HTTP_STATUS = 429
+
+# Bounded retry: at most 2 retries after the initial request (3 attempts
+# total). Backoff is ~1s then ~2s plus a small jitter, UNLESS Z.ai's own
+# Retry-After header is present on that response, which then takes
+# precedence over the fixed schedule for that attempt.
+_MAX_ATTEMPTS = 3
+_BASE_BACKOFF_SECONDS = (0.0, 1.0, 2.0)  # index 0 unused (no delay before attempt 1)
+_BACKOFF_JITTER_SECONDS = 0.25
+
+
+def _is_retryable_overload(status_code: int, provider_code: str | None) -> bool:
+    """True only for Z.ai's documented transient-overload signal — HTTP 429
+    with error.code=="1305". A quota/balance/entitlement 429 carries a
+    different code and must fall through to the existing non-retrying
+    ProviderRateLimited path unchanged."""
+    return status_code == _TRANSIENT_OVERLOAD_HTTP_STATUS and provider_code == _TRANSIENT_OVERLOAD_PROVIDER_CODE
+
+
+def _retry_delay_seconds(attempt_number: int, retry_after: str | None) -> float:
+    """attempt_number is the attempt about to be made (2 or 3 here, since
+    there is never a delay before attempt 1). Z.ai's Retry-After, when
+    present and parseable, takes precedence over the fixed backoff
+    schedule for that attempt."""
+    if retry_after is not None:
+        try:
+            parsed = float(retry_after)
+            if parsed >= 0:
+                return parsed
+        except ValueError:
+            pass
+    base = _BASE_BACKOFF_SECONDS[attempt_number - 1] if attempt_number - 1 < len(_BASE_BACKOFF_SECONDS) else _BASE_BACKOFF_SECONDS[-1]
+    return base + random.uniform(0, _BACKOFF_JITTER_SECONDS)
 
 
 def _safe_provider_error_fields(response: httpx.Response) -> tuple[str | None, str | None, str | None, str | None]:
@@ -81,19 +135,28 @@ def _safe_provider_error_fields(response: httpx.Response) -> tuple[str | None, s
     return provider_code, provider_message, retry_after, provider_request_id
 
 
-def _log_provider_rejected(request_turn_id: str, response: httpx.Response) -> None:
+def _log_provider_rejected(
+    request_turn_id: str,
+    response: httpx.Response,
+    *,
+    attempt: int | None = None,
+    duration_ms: int | None = None,
+) -> None:
     """Logs the safe, bounded diagnostic fields for a non-2xx GLM response —
-    HTTP status, Z.ai's own error.code/error.message, Retry-After, and a
-    provider request id, if present. Never logs the API key, the
-    Authorization header, the prompt, or the RoomDraft/context payload —
-    none of those are read here at all."""
+    turn id, attempt number, HTTP status, Z.ai's own error.code/
+    error.message, request duration, Retry-After, and a provider request
+    id, if present. Never logs the API key, the Authorization header, the
+    prompt, or the RoomDraft/context payload — none of those are read here
+    at all."""
     provider_code, provider_message, retry_after, provider_request_id = _safe_provider_error_fields(response)
     logger.warning(
-        "glm_spatial_provider_rejected turn_id=%s http_status=%s provider_code=%s provider_message=%s retry_after=%s provider_request_id=%s",
+        "glm_spatial_provider_rejected turn_id=%s attempt=%s http_status=%s provider_code=%s provider_message=%s duration_ms=%s retry_after=%s provider_request_id=%s",
         request_turn_id,
+        attempt,
         response.status_code,
         provider_code,
         json.dumps(provider_message) if provider_message is not None else None,
+        duration_ms,
         retry_after,
         provider_request_id,
     )
@@ -132,63 +195,7 @@ class GLMProvider:
         return self.reason_element(request)
 
     def reason_element(self, request: SpatialReasoningRequest) -> SpatialReasoningResult:
-        system, user = build_spatial_reasoning_messages(request)
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "response_format": {"type": "json_object"},
-            "max_tokens": self._max_output_tokens,
-            "stream": False,
-            "reasoning_effort": self._reasoning_effort,
-        }
-
-        destination = urlparse(f"{self._base_url}/chat/completions")
-        started_at = time.monotonic()
-        logger.info(
-            "glm_spatial_request_started turn_id=%s destination_host=%s destination_path=%s model=%s",
-            request.turnId,
-            destination.hostname,
-            destination.path,
-            self._model,
-        )
-        try:
-            response = self._client.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-            )
-        except httpx.TimeoutException:
-            logger.warning("glm_spatial_request_failed turn_id=%s failure_class=timeout duration_ms=%d", request.turnId, int((time.monotonic() - started_at) * 1000))
-            raise ProviderTimeout("spatial reasoning provider request timed out") from None
-        except httpx.HTTPError:
-            logger.warning("glm_spatial_request_failed turn_id=%s failure_class=transport duration_ms=%d", request.turnId, int((time.monotonic() - started_at) * 1000))
-            raise ProviderUnavailable("spatial reasoning provider request failed") from None
-
-        logger.info(
-            "glm_spatial_response_received turn_id=%s http_status=%s duration_ms=%d",
-            request.turnId,
-            response.status_code,
-            int((time.monotonic() - started_at) * 1000),
-        )
-
-        if response.status_code == 429:
-            _log_provider_rejected(request.turnId, response)
-            raise ProviderRateLimited("spatial reasoning provider rate limit exceeded")
-        if response.status_code in _RETRYABLE_SERVER_STATUS_CODES:
-            _log_provider_rejected(request.turnId, response)
-            raise ProviderUnavailable("spatial reasoning provider temporarily unavailable")
-        if response.is_redirect:
-            # follow_redirects=False means httpx never follows this
-            # automatically; a 3xx here is itself treated as invalid output
-            # — GLM's API contract never redirects a legitimate response.
-            _log_provider_rejected(request.turnId, response)
-            raise InvalidProviderResponse("spatial reasoning provider returned an unexpected redirect")
-        if response.status_code != 200:
-            _log_provider_rejected(request.turnId, response)
-            raise ProviderUnavailable("spatial reasoning provider request failed")
+        response = self._post_with_bounded_overload_retry(request)
 
         try:
             body = response.json()
@@ -221,3 +228,125 @@ class GLMProvider:
             promptVersion=SPATIAL_REASONING_PROMPT_VERSION,
             schemaVersion=1,
         )
+
+    def _post_with_bounded_overload_retry(self, request: SpatialReasoningRequest) -> httpx.Response:
+        """Makes the outbound POST, retrying ONLY on Z.ai's own transient-
+        overload signal (HTTP 429, error.code=="1305") — up to _MAX_ATTEMPTS
+        total attempts. Every other outcome (success, a different 429
+        reason, any other status, timeout, transport failure) returns or
+        raises immediately from the first attempt that produces it, exactly
+        as reason_element did before this retry existed — _post_once
+        raises directly for all of those, so this loop only ever has to
+        handle the one case it returns normally for: a retryable overload
+        response. The same SpatialReasoningRequest/turn/payload is reused
+        for every attempt — no new DesignTurn, session, or request context
+        is created; this loop is invisible to Go, which still sees one
+        ReasonElement call."""
+        last_overload_response: httpx.Response | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            response, retryable_overload = self._post_once(request, attempt)
+            if not retryable_overload:
+                return response
+            last_overload_response = response
+            if attempt < _MAX_ATTEMPTS:
+                retry_after = response.headers.get("retry-after")
+                delay = _retry_delay_seconds(attempt + 1, retry_after)
+                delay_ms = int(delay * 1000)
+                logger.warning(
+                    "glm_spatial_overload_retry_scheduled turn_id=%s attempt=%d next_attempt=%d retry_delay_ms=%d",
+                    request.turnId,
+                    attempt,
+                    attempt + 1,
+                    delay_ms,
+                )
+                time.sleep(delay)
+
+        # _MAX_ATTEMPTS consecutive transient-overload responses: surface
+        # the SAME ProviderRateLimited a single non-retried 429 always has
+        # — Go's existing needs_attention/design_reasoning_provider_rejected
+        # classification is completely unchanged, it just now happens after
+        # a bounded number of attempts instead of always after exactly one.
+        assert last_overload_response is not None  # loop always runs >=1 time and only reaches here via the overload branch
+        raise ProviderRateLimited("spatial reasoning provider rate limit exceeded")
+
+    def _post_once(self, request: SpatialReasoningRequest, attempt: int) -> tuple[httpx.Response, bool]:
+        """One HTTP attempt. Returns (response, is_retryable_overload):
+        - (response, False) on 2xx — the caller returns it as
+          reason_element always has.
+        - (response, True) ONLY for HTTP 429 with error.code=="1305" — the
+          caller may retry.
+        Every other outcome (a different 429 reason, any other non-2xx
+        status, a redirect, timeout, or transport failure) raises directly
+        — never retried, matching every pre-existing classification other
+        than the one narrow overload case."""
+        system, user = build_spatial_reasoning_messages(request)
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": self._max_output_tokens,
+            "stream": False,
+            "reasoning_effort": self._reasoning_effort,
+        }
+
+        destination = urlparse(f"{self._base_url}/chat/completions")
+        started_at = time.monotonic()
+        logger.info(
+            "glm_spatial_request_started turn_id=%s attempt=%d destination_host=%s destination_path=%s model=%s",
+            request.turnId,
+            attempt,
+            destination.hostname,
+            destination.path,
+            self._model,
+        )
+        try:
+            response = self._client.post(
+                f"{self._base_url}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            )
+        except httpx.TimeoutException:
+            logger.warning(
+                "glm_spatial_request_failed turn_id=%s attempt=%d failure_class=timeout duration_ms=%d",
+                request.turnId, attempt, int((time.monotonic() - started_at) * 1000),
+            )
+            raise ProviderTimeout("spatial reasoning provider request timed out") from None
+        except httpx.HTTPError:
+            logger.warning(
+                "glm_spatial_request_failed turn_id=%s attempt=%d failure_class=transport duration_ms=%d",
+                request.turnId, attempt, int((time.monotonic() - started_at) * 1000),
+            )
+            raise ProviderUnavailable("spatial reasoning provider request failed") from None
+
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        logger.info(
+            "glm_spatial_response_received turn_id=%s attempt=%d http_status=%s duration_ms=%d",
+            request.turnId,
+            attempt,
+            response.status_code,
+            duration_ms,
+        )
+
+        if response.status_code == _TRANSIENT_OVERLOAD_HTTP_STATUS:
+            provider_code, _, _, _ = _safe_provider_error_fields(response)
+            _log_provider_rejected(request.turnId, response, attempt=attempt, duration_ms=duration_ms)
+            if _is_retryable_overload(response.status_code, provider_code):
+                return response, True
+            raise ProviderRateLimited("spatial reasoning provider rate limit exceeded")
+        if response.status_code in _RETRYABLE_SERVER_STATUS_CODES:
+            _log_provider_rejected(request.turnId, response, attempt=attempt, duration_ms=duration_ms)
+            raise ProviderUnavailable("spatial reasoning provider temporarily unavailable")
+        if response.is_redirect:
+            # follow_redirects=False means httpx never follows this
+            # automatically; a 3xx here is itself treated as invalid output
+            # — GLM's API contract never redirects a legitimate response.
+            _log_provider_rejected(request.turnId, response, attempt=attempt, duration_ms=duration_ms)
+            raise InvalidProviderResponse("spatial reasoning provider returned an unexpected redirect")
+        if response.status_code != 200:
+            _log_provider_rejected(request.turnId, response, attempt=attempt, duration_ms=duration_ms)
+            raise ProviderUnavailable("spatial reasoning provider request failed")
+
+        return response, False
