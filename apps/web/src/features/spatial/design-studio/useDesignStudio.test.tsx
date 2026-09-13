@@ -11,27 +11,27 @@ describe("useDesignStudio — target tracking", () => {
 
   it("selecting a target starts fresh tracking with no session yet", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     expect(result.current.target).toEqual({ kind: "object", id: "object_sofa_123" });
     expect(result.current.sessionId).toBeNull();
   });
 
-  it("selecting the SAME target again is a no-op (does not reset an in-progress session)", () => {
+  it("selecting the SAME target at the SAME context key again is a no-op (does not reset an in-progress session)", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", "turn_1", "attempt_1"));
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     expect(result.current.sessionId).toBe("session_1");
   });
 
   it("selecting a DIFFERENT target clears the previous target's session/prompt/comparison mode", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", "turn_1", "attempt_1"));
     act(() => result.current.setPromptDraft("make it curved"));
     act(() => result.current.setComparisonMode("concept"));
 
-    act(() => result.current.selectTarget({ kind: "fixture", id: "fixture_ac_1" }));
+    act(() => result.current.selectTarget({ kind: "fixture", id: "fixture_ac_1" }, "draft_1:2:fixture:fixture_ac_1"));
 
     expect(result.current.target).toEqual({ kind: "fixture", id: "fixture_ac_1" });
     expect(result.current.sessionId).toBeNull();
@@ -41,11 +41,30 @@ describe("useDesignStudio — target tracking", () => {
     expect(result.current.comparisonMode).toBe("current");
   });
 
+  it("the SAME target at a NEW RoomDraft revision (new context key) clears the previous session/prompt/comparison mode", () => {
+    const { result } = renderHook(() => useDesignStudio());
+    act(() => result.current.selectTarget({ kind: "fixture", id: "fixture_refrigerator" }, "draft_1:2:fixture:fixture_refrigerator"));
+    act(() => result.current.restoreSession("session_1", "turn_1", "attempt_1"));
+    act(() => result.current.setPromptDraft("move it down"));
+
+    // Revision bumped 2 -> 3 under the SAME target: a new logical session
+    // context, not a no-op — the stale session must not carry forward
+    // (this is the exact production bug: reusing a revision-2 session's
+    // tracking, and therefore its clientSessionId, at revision 3).
+    act(() => result.current.selectTarget({ kind: "fixture", id: "fixture_refrigerator" }, "draft_1:3:fixture:fixture_refrigerator"));
+
+    expect(result.current.target).toEqual({ kind: "fixture", id: "fixture_refrigerator" });
+    expect(result.current.sessionId).toBeNull();
+    expect(result.current.activeTurnId).toBeNull();
+    expect(result.current.activeAttemptId).toBeNull();
+    expect(result.current.promptDraft).toBe("");
+  });
+
   it("clearing the selection (null target) clears tracking entirely", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", null, null));
-    act(() => result.current.selectTarget(null));
+    act(() => result.current.selectTarget(null, null));
     expect(result.current.target).toBeNull();
     expect(result.current.sessionId).toBeNull();
   });
@@ -54,7 +73,7 @@ describe("useDesignStudio — target tracking", () => {
 describe("useDesignStudio — session/turn/attempt lifecycle", () => {
   it("restoreSession populates session/turn/attempt for the current target", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", "turn_1", "attempt_1"));
     expect(result.current.sessionId).toBe("session_1");
     expect(result.current.activeTurnId).toBe("turn_1");
@@ -69,7 +88,7 @@ describe("useDesignStudio — session/turn/attempt lifecycle", () => {
 
   it("turnCreated sets the active turn and clears any active attempt + prompt draft", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", null, "attempt_stale"));
     act(() => result.current.setPromptDraft("make it curved"));
 
@@ -82,7 +101,7 @@ describe("useDesignStudio — session/turn/attempt lifecycle", () => {
 
   it("attemptCreated sets the active attempt without touching the turn", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", "turn_1", null));
     act(() => result.current.attemptCreated("attempt_1"));
     expect(result.current.activeTurnId).toBe("turn_1");
@@ -123,7 +142,7 @@ describe("useDesignStudio — comparison mode and collapse", () => {
 describe("useDesignStudio — acceptance", () => {
   it("accepted() forces comparison mode back to current, clears prompt draft, closes refinement", () => {
     const { result } = renderHook(() => useDesignStudio());
-    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }));
+    act(() => result.current.selectTarget({ kind: "object", id: "object_sofa_123" }, "draft_1:2:object:object_sofa_123"));
     act(() => result.current.restoreSession("session_1", "turn_1", "attempt_1"));
     act(() => result.current.setComparisonMode("concept"));
     act(() => result.current.openRefinementDraft());
