@@ -755,3 +755,78 @@ class TestPostSuccessShapeDiagnostics:
         assert "content_length=0" not in caplog.text  # VALID_DELTA's JSON content is non-empty
         assert "stage=empty_content" not in caplog.text
         assert json.dumps(VALID_DELTA) not in caplog.text
+
+
+class TestEmptyContentThinkingBudgetDiagnostics:
+    """Root-cause hypothesis under investigation: GLM's default "thinking"
+    behavior may consume the entire max_tokens=2000 budget on
+    reasoning_content, leaving message.content empty before any structured
+    JSON is emitted (finish_reason="length"). This pins the exact
+    diagnostic fields the empty_content stage must carry to confirm or
+    rule out that hypothesis from a real production response — without
+    ever logging the response content or the reasoning text itself."""
+
+    def test_empty_content_with_length_truncation_shape_logs_diagnostic_fields(self, caplog):
+        """The exact synthetic shape from the root-cause hypothesis:
+        content="", reasoning_content non-empty, finish_reason="length",
+        completion_tokens at the configured max_tokens budget."""
+        body = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "internal chain-of-thought that must never be logged " * 20,
+                    },
+                    "finish_reason": "length",
+                }
+            ],
+            "usage": {"completion_tokens": 2000, "prompt_tokens": 400, "total_tokens": 2400},
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=body)
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=empty_content" in caplog.text
+        assert "turn_id=turn_002" in caplog.text
+        assert "attempt=1" in caplog.text
+        assert "finish_reason=length" in caplog.text
+        assert "choices_count=1" in caplog.text
+        assert "content_present=False" in caplog.text
+        assert "content_length=0" in caplog.text
+        assert "reasoning_content_present=True" in caplog.text
+        assert "reasoning_content_length=" in caplog.text
+        assert "tool_calls_present=False" in caplog.text
+        assert "completion_tokens=2000" in caplog.text
+        assert "total_tokens=2400" in caplog.text
+
+        # Never the actual content/reasoning text.
+        assert "internal chain-of-thought" not in caplog.text
+        assert "test-glm-key" not in caplog.text
+        assert "Bearer" not in caplog.text
+        assert FIXTURE_REQUEST["instruction"] not in caplog.text
+
+    def test_empty_content_without_length_truncation_still_logs_fields_but_different_finish_reason(self, caplog):
+        """Same empty-content branch, but finish_reason != "length" — the
+        diagnostic must still report the real finish_reason rather than
+        assuming truncation, so this hypothesis can be RULED OUT by a
+        production response that doesn't match it."""
+        body = {
+            "choices": [{"message": {"content": ""}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 50, "prompt_tokens": 400, "total_tokens": 450},
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=body)
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=empty_content" in caplog.text
+        assert "finish_reason=stop" in caplog.text
+        assert "reasoning_content_present=False" in caplog.text
+        assert "completion_tokens=50" in caplog.text
