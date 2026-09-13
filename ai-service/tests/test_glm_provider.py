@@ -580,3 +580,178 @@ class TestPostSuccessFailureStageDiagnostics:
             provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
 
         assert "glm_spatial_post_success_failure" not in caplog.text
+
+
+class TestPostSuccessShapeDiagnostics:
+    """Root-cause instrumentation only: production confirmed a real HTTP
+    200 from Z.ai reaching stage=empty_content — the envelope decodes and
+    has a message, but message.content itself is empty. This logs the
+    SHAPE of that 200 response (never its content) immediately before the
+    empty_content check, so the next production request tells us WHY
+    content came back empty — e.g. finish_reason=length (truncated before
+    any content token), or a tool_calls-only response, or reasoning_content
+    consuming the entire token budget."""
+
+    def _response_with_choice(self, message: dict, *, finish_reason: str | None = "stop", usage: dict | None = None) -> httpx.Response:
+        choice: dict = {"message": message}
+        if finish_reason is not None:
+            choice["finish_reason"] = finish_reason
+        body: dict = {"choices": [choice]}
+        if usage is not None:
+            body["usage"] = usage
+        return httpx.Response(200, json=body)
+
+    def test_empty_content_with_reasoning_content_logs_shape(self, caplog):
+        """Case 1: empty content, but reasoning_content IS present — a
+        plausible cause is the model spending its entire output budget on
+        chain-of-thought before ever emitting the final content."""
+        response = self._response_with_choice(
+            {"content": "", "reasoning_content": "some internal reasoning text that must never be logged"},
+            finish_reason="stop",
+            usage={"completion_tokens": 2000, "prompt_tokens": 500, "total_tokens": 2500},
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return response
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_shape" in caplog.text
+        assert "turn_id=turn_002" in caplog.text
+        assert "attempt=1" in caplog.text
+        assert "choices_count=1" in caplog.text
+        assert "first_choice_present=True" in caplog.text
+        assert "content_type=str" in caplog.text
+        assert "content_length=0" in caplog.text
+        assert "reasoning_content_present=True" in caplog.text
+        assert "reasoning_content_type=str" in caplog.text
+        assert "reasoning_content_length=" in caplog.text
+        assert "finish_reason=stop" in caplog.text
+        assert "completion_tokens=2000" in caplog.text
+        assert "prompt_tokens=500" in caplog.text
+        assert "total_tokens=2500" in caplog.text
+        assert "some internal reasoning text" not in caplog.text
+        # stage=empty_content must still fire, unchanged, alongside the new shape log.
+        assert "stage=empty_content" in caplog.text
+
+    def test_empty_content_with_finish_reason_length_logs_shape(self, caplog):
+        """Case 2: empty content with finish_reason="length" — the
+        response was truncated by the token budget before any content was
+        emitted at all."""
+        response = self._response_with_choice(
+            {"content": ""},
+            finish_reason="length",
+            usage={"completion_tokens": 2000, "prompt_tokens": 800, "total_tokens": 2800},
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return response
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_shape" in caplog.text
+        assert "finish_reason=length" in caplog.text
+        assert "reasoning_content_present=False" in caplog.text
+        assert "reasoning_content_type=None" in caplog.text
+        assert "reasoning_content_length=None" in caplog.text
+        assert "stage=empty_content" in caplog.text
+
+    def test_empty_content_no_reasoning_or_tool_calls_logs_shape(self, caplog):
+        """Case 3: empty content, no reasoning_content, no tool_calls at
+        all — the plainest possible empty response."""
+        response = self._response_with_choice({"content": ""}, finish_reason="stop", usage=None)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return response
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_shape" in caplog.text
+        assert "reasoning_content_present=False" in caplog.text
+        assert "tool_calls_present=False" in caplog.text
+        assert "tool_calls_count=0" in caplog.text
+        assert "completion_tokens=None" in caplog.text
+        assert "prompt_tokens=None" in caplog.text
+        assert "total_tokens=None" in caplog.text
+        assert "stage=empty_content" in caplog.text
+
+    def test_shape_log_message_keys_and_tool_calls_present(self, caplog):
+        """message_keys must be sorted key NAMES only (never values), and
+        tool_calls presence/count must be derived without ever logging
+        call arguments."""
+        response = self._response_with_choice(
+            {
+                "content": "",
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "secret_tool", "arguments": '{"x": 1}'}},
+                ],
+            },
+            finish_reason="tool_calls",
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return response
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_shape" in caplog.text
+        assert "message_keys=" in caplog.text
+        assert "'content'" in caplog.text or "content" in caplog.text  # key NAME is safe
+        assert "tool_calls_present=True" in caplog.text
+        assert "tool_calls_count=1" in caplog.text
+        assert "secret_tool" not in caplog.text
+        assert '{"x": 1}' not in caplog.text
+        assert "call_1" not in caplog.text
+
+    def test_shape_log_never_leaks_response_content_or_secrets(self, caplog):
+        """Blanket safety net: content, reasoning_content, prompts, API
+        key, and Authorization header must never appear, across a
+        response that has real (non-empty) tempting values in every field
+        this diagnostic reads metadata from."""
+        response = self._response_with_choice(
+            {
+                "content": "",
+                "reasoning_content": "TOP-SECRET-CHAIN-OF-THOUGHT-VALUE",
+            },
+            finish_reason="stop",
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return response
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "TOP-SECRET-CHAIN-OF-THOUGHT-VALUE" not in caplog.text
+        assert "test-glm-key" not in caplog.text
+        assert "Bearer" not in caplog.text
+        assert FIXTURE_REQUEST["instruction"] not in caplog.text
+
+    def test_shape_log_fires_on_every_200_including_non_empty_content(self, caplog):
+        """Per spec, the shape log fires for EVERY successful HTTP 200,
+        immediately before the empty_content check — including the happy
+        path where content is present and valid. It must still never leak
+        the actual content, and stage=empty_content must NOT fire here
+        since content is non-empty."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response(json.dumps(VALID_DELTA))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.INFO):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_shape" in caplog.text
+        assert "content_length=0" not in caplog.text  # VALID_DELTA's JSON content is non-empty
+        assert "stage=empty_content" not in caplog.text
+        assert json.dumps(VALID_DELTA) not in caplog.text
