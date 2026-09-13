@@ -53,6 +53,54 @@ from app.schemas.spatial_reasoning import (
 _RETRYABLE_SERVER_STATUS_CODES = {500, 502, 503, 504}
 logger = logging.getLogger(__name__)
 
+# Task 1 (structural fingerprint diagnostics): bounds the SERIALISED
+# fingerprint string logged per failure — a pathological response with
+# thousands of keys must not flood logs. This bounds bytes actually
+# written to the log line, independent of fingerprint()'s own max_depth
+# (which bounds recursion, not serialised size).
+_FINGERPRINT_MAX_BYTES = 2048
+_FINGERPRINT_MAX_DEPTH = 3
+
+
+def fingerprint(obj: object, depth: int = 0, max_depth: int = _FINGERPRINT_MAX_DEPTH) -> object:
+    """Structural fingerprint of obj — key NAMES and value TYPE NAMES
+    only, NEVER values. Used to observe the actual shape of a parsed
+    GLM/Z.ai response when it fails ProposedSceneEditDelta validation,
+    instead of inferring the shape only from which fields are reported
+    missing. Bounded by max_depth so a deeply/adversarially nested object
+    cannot cause unbounded recursion; anything past max_depth becomes the
+    placeholder "…". A list is represented by the fingerprint of its
+    first element only (lists in this schema are homogeneous; the actual
+    element count is not safety-sensitive but is intentionally not
+    reported here to keep this function a pure shape probe)."""
+    if depth > max_depth:
+        return "…"
+    if isinstance(obj, dict):
+        return {k: fingerprint(v, depth + 1, max_depth) for k, v in sorted(obj.items(), key=lambda item: str(item[0]))}
+    if isinstance(obj, list):
+        return [fingerprint(obj[0], depth + 1, max_depth)] if obj else []
+    return type(obj).__name__
+
+
+def _safe_fingerprint(obj: object) -> tuple[str | None, str | None]:
+    """Wraps fingerprint() + serialization so a pathological input can
+    NEVER cause this diagnostic itself to raise or to propagate an
+    exception out of a logging call site. Returns
+    (serialised_fingerprint, fingerprint_error_class_name) — exactly one
+    of the two is non-None. The serialised string is truncated at
+    _FINGERPRINT_MAX_BYTES (UTF-8), with a truncation marker appended,
+    rather than emitting an unbounded string for a pathological response."""
+    try:
+        shape = fingerprint(obj)
+        serialised = json.dumps(shape, sort_keys=True, default=str)
+    except Exception as exc:  # noqa: BLE001 - deliberately broad: this must never propagate
+        return None, type(exc).__name__
+    encoded = serialised.encode("utf-8")
+    if len(encoded) > _FINGERPRINT_MAX_BYTES:
+        truncated = encoded[:_FINGERPRINT_MAX_BYTES].decode("utf-8", errors="ignore")
+        return truncated + "...<truncated>", None
+    return serialised, None
+
 # Z.ai's own transient-overload error code (as opposed to a quota/balance/
 # entitlement rejection, which is also surfaced as HTTP 429 but with a
 # DIFFERENT error.code and must never be retried — retrying a quota
@@ -162,11 +210,25 @@ def _safe_validation_error_locations(exc: ValidationError) -> list[str]:
     return locations
 
 
+def _safe_reasoning_tokens(body: object) -> int | None:
+    """Extracts ONLY usage.completion_tokens_details.reasoning_tokens (an
+    integer count) — never any other usage field, never the response
+    content. Returns None when absent or any expected level isn't a dict,
+    never raises."""
+    usage = body.get("usage") if isinstance(body, dict) else None
+    details = usage.get("completion_tokens_details") if isinstance(usage, dict) else None
+    reasoning_tokens = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    return reasoning_tokens if isinstance(reasoning_tokens, int) else None
+
+
 def _log_post_success_failure_stage(
     request_turn_id: str,
     attempt: int,
     stage: str,
     exc: Exception | None,
+    *,
+    parsed: object = None,
+    body: object = None,
 ) -> None:
     """Root-cause diagnostic ONLY (no behavior change): every post-200
     parsing/validation failure inside reason_element currently raises the
@@ -178,18 +240,38 @@ def _log_post_success_failure_stage(
     response content in their message. For a Pydantic ValidationError
     specifically, only field-location paths are logged (never its full
     errors() objects, which carry the offending input value) — see
-    _safe_validation_error_locations. Never logs the response body,
-    prompt, RoomDraft, API key, or Authorization header — none of those
-    are read here at all."""
+    _safe_validation_error_locations.
+
+    Task 1 (structural fingerprint diagnostics) additions: when `parsed`
+    is supplied (only schema_validation/target_mismatch have a parsed
+    JSON object at all — envelope_extraction/empty_content/
+    content_json_decode never reach json.loads), a bounded, key-names-
+    and-types-only fingerprint of it is logged so the ACTUAL shape of a
+    malformed response can be observed instead of only inferred from
+    which fields are reported missing; a pathological/unfingerprintable
+    input can never raise here (see _safe_fingerprint) — the failure
+    itself is logged as fingerprint_error=<class> instead. When `body` is
+    supplied, usage.completion_tokens_details.reasoning_tokens is also
+    logged if present. Never logs the response body, prompt, RoomDraft,
+    API key, or Authorization header — none of those are read here at
+    all."""
     exception_type = type(exc).__name__ if exc is not None else None
     field_locations = _safe_validation_error_locations(exc) if isinstance(exc, ValidationError) else None
+    fingerprint_str, fingerprint_error = (None, None)
+    if parsed is not None:
+        fingerprint_str, fingerprint_error = _safe_fingerprint(parsed)
+    reasoning_tokens = _safe_reasoning_tokens(body)
     logger.warning(
-        "glm_spatial_post_success_failure turn_id=%s attempt=%d stage=%s exception_type=%s field_locations=%s",
+        "glm_spatial_post_success_failure turn_id=%s attempt=%d stage=%s exception_type=%s field_locations=%s "
+        "fingerprint=%s fingerprint_error=%s reasoning_tokens=%s",
         request_turn_id,
         attempt,
         stage,
         exception_type,
         field_locations,
+        fingerprint_str,
+        fingerprint_error,
+        reasoning_tokens,
     )
 
 
@@ -378,35 +460,36 @@ class GLMProvider:
     def reason_element(self, request: SpatialReasoningRequest) -> SpatialReasoningResult:
         response, attempt = self._post_with_bounded_overload_retry(request)
 
+        body: object = None
         try:
             body = response.json()
             content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
-            _log_post_success_failure_stage(request.turnId, attempt, "envelope_extraction", exc)
+            _log_post_success_failure_stage(request.turnId, attempt, "envelope_extraction", exc, body=body)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
         _log_post_success_shape(request.turnId, attempt, body)
         if not content:
-            _log_post_success_failure_stage(request.turnId, attempt, "empty_content", None)
+            _log_post_success_failure_stage(request.turnId, attempt, "empty_content", None, body=body)
             _log_empty_content_diagnostic(request.turnId, attempt, body)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output")
 
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
-            _log_post_success_failure_stage(request.turnId, attempt, "content_json_decode", exc)
+            _log_post_success_failure_stage(request.turnId, attempt, "content_json_decode", exc, body=body)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
 
         try:
             delta = ProposedSceneEditDelta(**parsed)
         except ValidationError as exc:
-            _log_post_success_failure_stage(request.turnId, attempt, "schema_validation", exc)
+            _log_post_success_failure_stage(request.turnId, attempt, "schema_validation", exc, parsed=parsed, body=body)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
 
         # Cross-check: the model must echo back the SAME target it was
         # given — never trust the model to have understood which element it
         # was reasoning about (RP4E1 plan "design_plan_target_mismatch").
         if delta.target.kind != request.selectedElement.kind or delta.target.id != request.selectedElement.id:
-            _log_post_success_failure_stage(request.turnId, attempt, "target_mismatch", None)
+            _log_post_success_failure_stage(request.turnId, attempt, "target_mismatch", None, parsed=parsed, body=body)
             raise InvalidProviderResponse("spatial reasoning provider returned a mismatched target")
 
         return SpatialReasoningResult(
