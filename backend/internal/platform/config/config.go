@@ -814,20 +814,31 @@ func LoadFromEnv() (Config, error) {
 		// local/dev MongoDB is exactly the failure mode this task exists to
 		// close — fail fast rather than boot against localhost/127.0.0.1
 		// and silently operate on the wrong (or no) real data.
-		if isLocalMongoURI(cfg.MongoURI) {
+		if containsLoopbackHost(cfg.MongoURI) {
 			return Config{}, fmt.Errorf("config: MONGO_URI must not point at localhost/127.0.0.1 when APP_ENV=production")
+		}
+		// EXTERNAL_API_BASE_URL is the browser-facing origin baked directly
+		// into Supplier Invitation and Client Quotation portal links (M6/M8
+		// design docs) — it is emailed to real suppliers/clients. Its
+		// default is http://localhost:3000 for local dev; the same failure
+		// mode as the MongoDB check above (a copied-in dev default reaching
+		// production unnoticed) would put an unreachable localhost link in
+		// front of a real recipient, so it must fail fast rather than ever
+		// be silently distributed.
+		if containsLoopbackHost(cfg.ExternalAPIBaseURL) {
+			return Config{}, fmt.Errorf("config: EXTERNAL_API_BASE_URL must not point at localhost/127.0.0.1 when APP_ENV=production")
 		}
 	}
 
 	return cfg, nil
 }
 
-// isLocalMongoURI reports whether uri points at a loopback host — a
-// deliberately narrow, string-based check (parsing the mongodb:// scheme's
-// full host-list syntax is not required here) that catches the realistic
-// "someone copied the local .env.example value into production" mistake
-// without trying to be a general MongoDB URI validator.
-func isLocalMongoURI(uri string) bool {
+// containsLoopbackHost reports whether uri/URL points at a loopback host — a
+// deliberately narrow, string-based check (full URI/host-list parsing is not
+// required here) that catches the realistic "someone copied a local
+// .env.example value into production" mistake without trying to be a general
+// URI validator.
+func containsLoopbackHost(uri string) bool {
 	lower := strings.ToLower(uri)
 	for _, marker := range []string{"localhost", "127.0.0.1", "0.0.0.0", "[::1]"} {
 		if strings.Contains(lower, marker) {
