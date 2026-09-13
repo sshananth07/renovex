@@ -193,6 +193,71 @@ def _log_post_success_failure_stage(
     )
 
 
+def _log_post_success_shape(request_turn_id: str, attempt: int, body: object) -> None:
+    """Root-cause instrumentation ONLY (no behavior change): logs the
+    SHAPE of a successful HTTP 200 response body — never any of its
+    actual content — immediately before the empty_content check, for
+    EVERY successful response (not only the ones that end up empty).
+    Production confirmed a 200 reaching stage=empty_content; this exists
+    to reveal WHY content came back empty (e.g. finish_reason="length",
+    a tool_calls-only response, or reasoning_content consuming the whole
+    token budget) without ever reading message.content or
+    reasoning_content's VALUE — only their presence, Python type, and
+    length. Every field read here is presence/count/type/length metadata;
+    none of it is prompt, RoomDraft, credential, or response-content
+    data."""
+    choices = body.get("choices") if isinstance(body, dict) else None
+    choices_count = len(choices) if isinstance(choices, list) else None
+    first_choice = choices[0] if isinstance(choices, list) and choices else None
+    first_choice_present = first_choice is not None
+
+    message = first_choice.get("message") if isinstance(first_choice, dict) else None
+    message_keys = sorted(message.keys()) if isinstance(message, dict) else None
+
+    content = message.get("content") if isinstance(message, dict) else None
+    content_type = type(content).__name__ if content is not None else None
+    content_length = len(content) if isinstance(content, (str, list, dict)) else None
+
+    reasoning_content = message.get("reasoning_content") if isinstance(message, dict) else None
+    reasoning_content_present = reasoning_content is not None and reasoning_content != ""
+    reasoning_content_type = type(reasoning_content).__name__ if reasoning_content is not None else None
+    reasoning_content_length = len(reasoning_content) if isinstance(reasoning_content, (str, list, dict)) else None
+
+    tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+    tool_calls_present = bool(tool_calls)
+    tool_calls_count = len(tool_calls) if isinstance(tool_calls, list) else 0
+
+    finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
+
+    usage = body.get("usage") if isinstance(body, dict) else None
+    completion_tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+    prompt_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+    total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+
+    logger.info(
+        "glm_spatial_post_success_shape turn_id=%s attempt=%d choices_count=%s first_choice_present=%s "
+        "message_keys=%s content_type=%s content_length=%s reasoning_content_present=%s "
+        "reasoning_content_type=%s reasoning_content_length=%s tool_calls_present=%s tool_calls_count=%s "
+        "finish_reason=%s completion_tokens=%s prompt_tokens=%s total_tokens=%s",
+        request_turn_id,
+        attempt,
+        choices_count,
+        first_choice_present,
+        message_keys,
+        content_type,
+        content_length,
+        reasoning_content_present,
+        reasoning_content_type,
+        reasoning_content_length,
+        tool_calls_present,
+        tool_calls_count,
+        finish_reason,
+        completion_tokens,
+        prompt_tokens,
+        total_tokens,
+    )
+
+
 def _log_provider_rejected(
     request_turn_id: str,
     response: httpx.Response,
@@ -267,6 +332,7 @@ class GLMProvider:
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             _log_post_success_failure_stage(request.turnId, attempt, "envelope_extraction", exc)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output") from None
+        _log_post_success_shape(request.turnId, attempt, body)
         if not content:
             _log_post_success_failure_stage(request.turnId, attempt, "empty_content", None)
             raise InvalidProviderResponse("spatial reasoning provider returned invalid structured output")
