@@ -59,9 +59,17 @@ func NewHTTPHandler(cfg config.Config, logger zerolog.Logger, mongoClient *mongo
 	identity.RegisterHandlers(api, services.Auth, int(httpAppRefreshTokenTTL.Seconds()), cfg.RefreshCookieSecure, cfg.RefreshCookieSameSite, cfg.AllowedOrigins)
 	identity.RegisterRegistrationVerificationHandlers(api, services.RegistrationVerification)
 
-	secureSupplierCookies := cfg.AppEnv != "development" &&
-		cfg.AppEnv != "local" && cfg.AppEnv != "test"
-	supplieraccess.RegisterHandlers(api, services.SupplierAccess, secureSupplierCookies, cfg.RefreshCookieSameSite)
+	// Supplier Access cookies share identity's RefreshCookieSecure/SameSite
+	// config rather than deriving Secure from AppEnv: a SameSite=None cookie
+	// that isn't also Secure is spec-invalid and gets silently dropped by
+	// every modern browser (Chrome and others reject it outright, with no
+	// console warning), which breaks Supplier Access in Renovex's tester
+	// topology (Web and API on two different Vercel domains) whenever AppEnv
+	// isn't exactly "production" — including the deliberately non-production
+	// tester deployments this env matrix documents. AUTH_REFRESH_COOKIE_SECURE
+	// already defaults to true and is independently configurable, so reusing
+	// it here needs no new environment variable.
+	supplieraccess.RegisterHandlers(api, services.SupplierAccess, cfg.RefreshCookieSecure, cfg.RefreshCookieSameSite)
 	rfqissuance.RegisterSupplierHandlers(api, services.RFQIssuance)
 	supplieroffers.RegisterHandlers(api, services.SupplierOffers)
 
