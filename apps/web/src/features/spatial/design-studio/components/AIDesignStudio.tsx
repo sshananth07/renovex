@@ -69,17 +69,33 @@ export function AIDesignStudio({
   const studio = useDesignStudio();
   const ensureSession = useEnsureDesignSession();
 
+  // sessionContextKey identifies the ONE logical design-session-creation
+  // request: {roomDraftId, roomDraft revision, target.kind, target.id}. A
+  // SpatialDesignSession is revision-bound server-side
+  // (BasedOnRoomDraftRevision), so a revision bump under the SAME target is
+  // just as much a new session context as switching targets entirely — both
+  // must rotate clientSessionId and drop any tracked sessionId for the old
+  // context. Undefined draft (still loading) has no revision yet, so the
+  // key is null until draft resolves — ensureForRevision already guards on
+  // `!draft` separately below.
+  const sessionContextKey =
+    selection && draft ? `${roomDraftId}:${draft.revision}:${selection.kind}:${selection.id}` : null;
+
   useEffect(() => {
-    studio.selectTarget(selection);
-  }, [selection?.kind, selection?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    studio.selectTarget(selection, sessionContextKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionContextKey]);
 
   const isSupportedKind = isSupportedDesignTarget(selection);
 
-  // Deterministic per-{roomDraftId,kind,id} clientSessionId — the backend's
-  // CreateDesignSession fingerprints on exactly this tuple, so repeat calls
-  // for the same target are idempotent replays (find-or-restore), never new
-  // sessions (see designSessionQueries.ts's doc comment).
-  const clientSessionId = selection ? `studio:${roomDraftId}:${selection.kind}:${selection.id}` : null;
+  // clientSessionId is deterministic PER sessionContextKey — the backend's
+  // CreateDesignSession fingerprints on exactly this tuple (company +
+  // clientSessionId + roomDraftId + expectedRevision + target), so repeat
+  // calls for the SAME context are idempotent replays (find-or-restore,
+  // e.g. a network retry), while a target OR revision change always yields
+  // a fresh id, never colliding with a stale in-flight/cached id from a
+  // prior context (see designSessionQueries.ts's doc comment).
+  const clientSessionId = sessionContextKey ? `studio:${sessionContextKey}` : null;
   const [actionError, setActionError] = useState<string | null>(null);
 
   // §13: a manual canonical edit landing WHILE this ensure-session request
@@ -142,7 +158,7 @@ export function AIDesignStudio({
     if (studio.sessionId) return;
     ensureForRevision(draft.revision, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection?.kind, selection?.id, isSupportedKind, Boolean(draft), clientSessionId, studio.sessionId]);
+  }, [sessionContextKey, isSupportedKind, Boolean(draft), clientSessionId, studio.sessionId]);
 
   const sessionQuery = useDesignSession(studio.sessionId);
   const turnsQuery = useDesignTurns(studio.sessionId);
