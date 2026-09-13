@@ -410,3 +410,181 @@ describe("AIDesignStudio — design-session request-conflict retry (§13)", () =
     expect(sessionCreateCalls).toBe(2);
   });
 });
+
+// clientSessionId lifecycle regression suite — production hit 409
+// design_session_request_conflict because clientSessionId was derived from
+// only {roomDraftId, kind, id}, omitting the RoomDraft revision. A session
+// is revision-bound server-side (BasedOnRoomDraftRevision), so switching
+// target OR advancing revision under the same target must rotate
+// clientSessionId to a fresh id for the new logical session context,
+// while a plain retry of the SAME context must keep reusing the same id
+// (that's what makes CreateDesignSession's idempotent replay work at all).
+describe("AIDesignStudio — clientSessionId lifecycle", () => {
+  function capturingSessionRoute(calls: Array<{ clientSessionId: string; expectedRoomDraftRevision: number }>) {
+    return http.post(`${baseUrl}/spatial/design-sessions`, async ({ request }) => {
+      const body = (await request.json()) as { clientSessionId: string; expectedRoomDraftRevision: number };
+      calls.push({ clientSessionId: body.clientSessionId, expectedRoomDraftRevision: body.expectedRoomDraftRevision });
+      return HttpResponse.json({
+        session: { ...session, id: `session_for_${body.clientSessionId}`, basedOnRoomDraftRevision: body.expectedRoomDraftRevision },
+      });
+    });
+  }
+
+  // B. Target change rotates clientSessionId — reproduces the exact
+  // production sequence: revision 2, kitchen_island -> create session, then
+  // still revision 2, switch to refrigerator -> ensure session. The two
+  // calls must use DIFFERENT clientSessionIds, so the second call can never
+  // collide with the first's fingerprint and never surfaces
+  // design_session_request_conflict.
+  it("target change (kitchen_island -> refrigerator) at the SAME revision uses a different clientSessionId", async () => {
+    mockAuth();
+    const calls: Array<{ clientSessionId: string; expectedRoomDraftRevision: number }> = [];
+    server.use(
+      capturingSessionRoute(calls),
+      http.get(`${baseUrl}/spatial/design-sessions/:id`, () => HttpResponse.json({ session, stale: false, currentRoomDraftRevision: 2 })),
+      http.get(`${baseUrl}/spatial/design-sessions/:id/turns`, () => HttpResponse.json([])),
+    );
+    const draftAtRevision2 = {
+      ...draft,
+      revision: 2,
+      objects: [],
+      fixtures: [
+        { id: "kitchen_island", category: "island", transform: { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0, w: 1 } } },
+        { id: "refrigerator", category: "refrigerator", transform: { position: { x: 1, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0, w: 1 } } },
+      ],
+    } as unknown as RoomDraft;
+
+    const { rerender } = renderWithProviders(
+      <AIDesignStudio roomDraftId="draft_1" draft={draftAtRevision2} selection={{ kind: "fixture", id: "kitchen_island" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+
+    rerender(
+      <AIDesignStudio roomDraftId="draft_1" draft={draftAtRevision2} selection={{ kind: "fixture", id: "refrigerator" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+
+    expect(calls[0].expectedRoomDraftRevision).toBe(2);
+    expect(calls[1].expectedRoomDraftRevision).toBe(2);
+    expect(calls[0].clientSessionId).not.toBe(calls[1].clientSessionId);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // C. Revision change under the SAME target also rotates clientSessionId —
+  // the half of the bug that switching targets alone does not cover: the
+  // old key was {roomDraftId, kind, id} only, so a revision bump with no
+  // target change reused the SAME id and collided with the new
+  // fingerprint (different expectedRoomDraftRevision) at the Mongo unique
+  // index, surfacing 409 design_session_request_conflict.
+  it("a RoomDraft revision change under the SAME target uses a different clientSessionId", async () => {
+    mockAuth();
+    const calls: Array<{ clientSessionId: string; expectedRoomDraftRevision: number }> = [];
+    server.use(
+      capturingSessionRoute(calls),
+      http.get(`${baseUrl}/spatial/design-sessions/:id`, () => HttpResponse.json({ session, stale: false, currentRoomDraftRevision: 3 })),
+      http.get(`${baseUrl}/spatial/design-sessions/:id/turns`, () => HttpResponse.json([])),
+    );
+    const refrigeratorDraft = (revision: number) =>
+      ({
+        ...draft,
+        revision,
+        objects: [],
+        fixtures: [{ id: "refrigerator", category: "refrigerator", transform: { position: { x: 1, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0, w: 1 } } }],
+      }) as unknown as RoomDraft;
+
+    const { rerender } = renderWithProviders(
+      <AIDesignStudio roomDraftId="draft_1" draft={refrigeratorDraft(2)} selection={{ kind: "fixture", id: "refrigerator" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].expectedRoomDraftRevision).toBe(2);
+
+    rerender(
+      <AIDesignStudio roomDraftId="draft_1" draft={refrigeratorDraft(3)} selection={{ kind: "fixture", id: "refrigerator" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+
+    expect(calls[1].expectedRoomDraftRevision).toBe(3);
+    expect(calls[0].clientSessionId).not.toBe(calls[1].clientSessionId);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // E. A stale session (revision advanced while an old session already
+  // exists) must not be silently reused for the new revision — this is the
+  // same mechanism as test C, verified from the "session already
+  // established, THEN revision moves" ordering rather than "revision
+  // already moved before mount".
+  it("advancing the revision after a session is already established creates a new revision-bound session, not a silent reuse", async () => {
+    mockAuth();
+    const calls: Array<{ clientSessionId: string; expectedRoomDraftRevision: number }> = [];
+    server.use(
+      capturingSessionRoute(calls),
+      http.get(`${baseUrl}/spatial/design-sessions/:id`, ({ params }) =>
+        HttpResponse.json({ session: { ...session, id: params.id as string }, stale: false, currentRoomDraftRevision: 5 }),
+      ),
+      http.get(`${baseUrl}/spatial/design-sessions/:id/turns`, () => HttpResponse.json([])),
+    );
+
+    const { rerender } = renderWithProviders(
+      <AIDesignStudio roomDraftId="draft_1" draft={draft} selection={{ kind: "object", id: "object_sofa_1" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+
+    rerender(
+      <AIDesignStudio roomDraftId="draft_1" draft={{ ...draft, revision: 6 }} selection={{ kind: "object", id: "object_sofa_1" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+
+    expect(calls[0].expectedRoomDraftRevision).toBe(5);
+    expect(calls[1].expectedRoomDraftRevision).toBe(6);
+    expect(calls[0].clientSessionId).not.toBe(calls[1].clientSessionId);
+  });
+
+  // D. A failed turn does not invalidate the DesignSession: same context,
+  // second prompt after a failed turn must reuse the EXISTING session
+  // (exactly one POST /spatial/design-sessions total) and post a new turn,
+  // never re-create the session.
+  it("submitting a second prompt after a failed turn reuses the existing session (no second POST /spatial/design-sessions)", async () => {
+    mockAuth();
+    let sessionCreateCalls = 0;
+    let turnCreateCalls = 0;
+    const failedTurn = {
+      id: "turn_failed_1",
+      sessionId: "session_1",
+      basedOnRoomDraftRevision: 5,
+      createdAt: "2026-09-09T00:00:00Z",
+      instruction: "move it down",
+      sequence: 1,
+      status: "failed",
+    };
+    server.use(
+      http.post(`${baseUrl}/spatial/design-sessions`, () => {
+        sessionCreateCalls++;
+        return HttpResponse.json({ session });
+      }),
+      http.get(`${baseUrl}/spatial/design-sessions/:id`, () => HttpResponse.json({ session, stale: false, currentRoomDraftRevision: 5 })),
+      http.get(`${baseUrl}/spatial/design-sessions/:id/turns`, () => HttpResponse.json([failedTurn])),
+      http.post(`${baseUrl}/spatial/design-sessions/:id/turns`, () => {
+        turnCreateCalls++;
+        return HttpResponse.json({ ...failedTurn, id: `turn_retry_${turnCreateCalls}` });
+      }),
+    );
+
+    renderWithProviders(
+      <AIDesignStudio roomDraftId="draft_1" draft={draft} selection={{ kind: "object", id: "object_sofa_1" }} onSubmitEdit={vi.fn()} editingDisabled={false} />,
+    );
+
+    expect(await screen.findByText(/AI couldn't create a valid design proposal/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(sessionCreateCalls).toBe(1));
+
+    // studio.sessionId is unaffected by a turn's terminal status — only a
+    // selectTarget contextKey transition clears it (§C/§E above) — so the
+    // session must stay exactly the one already created for this context;
+    // no second POST /spatial/design-sessions is issued while the turn sits
+    // failed, and nothing here should provoke a design_session_request_
+    // conflict retry loop.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sessionCreateCalls).toBe(1);
+    expect(turnCreateCalls).toBe(0);
+    expect(screen.queryByRole("alert", { name: /conflict/i })).not.toBeInTheDocument();
+  });
+});
