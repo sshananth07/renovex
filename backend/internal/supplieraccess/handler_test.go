@@ -59,7 +59,7 @@ func openHandlerService(access *fakeInvitationAccess,
 
 func TestRegisterHandlersUsesBodyBasedChallengeAndResendRoutes(t *testing.T) {
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, nil, false)
+	supplieraccess.RegisterHandlers(api, nil, false, http.SameSiteLaxMode)
 
 	request := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
 	response := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestChallengeHandlerConsumesExchangeCookieAndReturnsOpaqueChallengeHandle(t
 	now := time.Now().UTC()
 	rig := newChallengeServiceRig(t, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	requestBody, _ := json.Marshal(map[string]string{
 		"operationId": "challenge-operation-http-1",
@@ -159,7 +159,7 @@ func TestChallengeHandlerUsesForwardedClientOnlyBehindTrustedProxy(t *testing.T)
 			netip.MustParsePrefix("10.0.0.0/8"),
 		}))
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, service, false)
+	supplieraccess.RegisterHandlers(api, service, false, http.SameSiteLaxMode)
 
 	requestBody, _ := json.Marshal(map[string]string{
 		"operationId": "challenge-operation-trusted-proxy",
@@ -202,7 +202,7 @@ func TestChallengeHandlerReturnsBoundedRateLimitWithoutConsumingCookie(t *testin
 	}
 	service := challengeHandlerService(rig, rates)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, service, false)
+	supplieraccess.RegisterHandlers(api, service, false, http.SameSiteLaxMode)
 
 	requestBody, _ := json.Marshal(map[string]string{
 		"operationId": "challenge-operation-rate-limited",
@@ -248,7 +248,7 @@ func TestResendHandlerUsesBodyHandleAndReturnsTheExistingChallenge(t *testing.T)
 		t.Fatalf("creating challenge before resend: %v", err)
 	}
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 	requestBody, _ := json.Marshal(map[string]string{
 		"challengeId": created.ChallengeID,
 		"operationId": "resend-operation-http-1",
@@ -288,7 +288,7 @@ func TestChallengeHandlerReturnsFailedDeliveryHandleWithoutProviderDetails(t *te
 	providerDetail := "smtp unavailable at private-mail-host:2525"
 	rig.mailer.err = errors.New(providerDetail)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	requestBody, _ := json.Marshal(map[string]string{
 		"operationId": "challenge-operation-mail-failed",
@@ -332,7 +332,7 @@ func TestChallengeHandlerClearsUnknownExchangeCookie(t *testing.T) {
 	now := time.Now().UTC()
 	rig := newChallengeServiceRig(t, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, true)
+	supplieraccess.RegisterHandlers(api, rig.service, true, http.SameSiteLaxMode)
 
 	requestBody, _ := json.Marshal(map[string]string{
 		"operationId": "challenge-operation-unknown-exchange",
@@ -377,7 +377,7 @@ func TestChallengeHandlerCollapsesMalformedAndUnknownExchangeCredentials(t *test
 		supplieraccess.WithVerificationMailer(rig.mailer),
 	)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, service, false)
+	supplieraccess.RegisterHandlers(api, service, false, http.SameSiteLaxMode)
 
 	send := func(cookieValue, operationID string) *httptest.ResponseRecorder {
 		requestBody, _ := json.Marshal(map[string]string{
@@ -439,7 +439,7 @@ func TestOpenHandlerExchangesTokenForCookieAndClean303(t *testing.T) {
 	store := &fakeAccessExchangeStore{}
 	service := openHandlerService(access, store, exchangeID, rawExchangeToken)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, service, true)
+	supplieraccess.RegisterHandlers(api, service, true, http.SameSiteLaxMode)
 
 	requestPath := "/supplier-access/open?token=" + url.QueryEscape(rawInvitationToken)
 	request := httptest.NewRequest(http.MethodGet, requestPath, nil)
@@ -488,7 +488,7 @@ func TestCleanOpenHandlerDisclosesNoInvitationIdentity(t *testing.T) {
 		&fakeInvitationAccess{}, &fakeAccessExchangeStore{},
 		opaqueToken(1), opaqueToken(2))
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, service, false)
+	supplieraccess.RegisterHandlers(api, service, false, http.SameSiteLaxMode)
 
 	request := httptest.NewRequest(http.MethodGet, "/supplier-access/open", nil)
 	response := httptest.NewRecorder()
@@ -523,7 +523,7 @@ func TestOpenHandlerUsesOneNeutralCredentialFailureAndBounded503(t *testing.T) {
 		service := openHandlerService(
 			access, &fakeAccessExchangeStore{}, opaqueToken(1), opaqueToken(2))
 		router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-		supplieraccess.RegisterHandlers(api, service, false)
+		supplieraccess.RegisterHandlers(api, service, false, http.SameSiteLaxMode)
 		request := httptest.NewRequest(http.MethodGet,
 			"/supplier-access/open?token="+url.QueryEscape(raw), nil)
 		response := httptest.NewRecorder()
@@ -556,7 +556,7 @@ func TestVerifyHandlerReturnsOnlyStatusAfterSettingBoundSessionCookies(t *testin
 	rig := newVerificationServiceRig(t, now)
 	challengeID, code := rig.createChallenge(t, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	requestBody, _ := json.Marshal(map[string]string{
 		"challengeId": challengeID,
@@ -637,7 +637,7 @@ func TestSupplierSessionBootstrapReturnsOnlyItsBoundInvitation(t *testing.T) {
 	rig := newVerificationServiceRig(t, now)
 	verified := verifySupplierSession(t, rig, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/supplier-access/session", nil)
@@ -677,7 +677,7 @@ func TestSupplierSessionBootstrapRejectsMissingInvalidExpiredAndRevokedSessions(
 	rig := newVerificationServiceRig(t, now)
 	verified := verifySupplierSession(t, rig, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	requestBootstrap := func(rawToken string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet,
@@ -733,7 +733,7 @@ func TestSupplierSessionBootstrapRejectsMissingInvalidExpiredAndRevokedSessions(
 	}
 	revokedRouter, revokedAPI := platformhttp.NewRouter(
 		"supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(revokedAPI, revokedRig.service, false)
+	supplieraccess.RegisterHandlers(revokedAPI, revokedRig.service, false, http.SameSiteLaxMode)
 	request := httptest.NewRequest(http.MethodGet,
 		"/supplier-access/session", nil)
 	request.AddCookie(&http.Cookie{
@@ -751,7 +751,7 @@ func TestSupplierSessionBootstrapCannotSelectAnotherInvitation(t *testing.T) {
 	rig := newVerificationServiceRig(t, now)
 	verified := verifySupplierSession(t, rig, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/supplier-access/session?invitationId=another-invitation", nil)
@@ -779,7 +779,7 @@ func TestVerifyHandlerRecoveryReturnsTheSameBodyAndCredentials(t *testing.T) {
 	rig := newVerificationServiceRig(t, now)
 	challengeID, code := rig.createChallenge(t, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 	body, _ := json.Marshal(map[string]string{
 		"challengeId": challengeID,
 		"code":        code,
@@ -836,7 +836,7 @@ func TestFailedVerificationNeverIssuesSessionOrCSRFCookies(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	rig := newVerificationServiceRig(t, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 	body, _ := json.Marshal(map[string]string{
 		"challengeId": opaqueToken(250),
 		"code":        "123456",
@@ -866,7 +866,7 @@ func TestLogoutHandlerReturnsEmpty204AndClearsBothCookies(t *testing.T) {
 	rig := newVerificationServiceRig(t, now)
 	verified := verifySupplierSession(t, rig, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, true)
+	supplieraccess.RegisterHandlers(api, rig.service, true, http.SameSiteLaxMode)
 
 	request := httptest.NewRequest(http.MethodPost,
 		"/supplier-access/session/logout", nil)
@@ -928,7 +928,7 @@ func TestUnknownSessionLogoutUsesTheSame204CleanupResponse(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	rig := newVerificationServiceRig(t, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 	csrf := opaqueToken(231)
 	request := httptest.NewRequest(http.MethodPost,
 		"/supplier-access/session/logout", nil)
@@ -962,7 +962,7 @@ func TestLogoutHandlerCSRF403DoesNotRevokeOrClearCookies(t *testing.T) {
 	rig := newVerificationServiceRig(t, now)
 	verified := verifySupplierSession(t, rig, now)
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, rig.service, false)
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
 
 	request := httptest.NewRequest(http.MethodPost,
 		"/supplier-access/session/logout", nil)
@@ -1001,7 +1001,7 @@ func TestLogoutHandlerCSRF403DoesNotRevokeOrClearCookies(t *testing.T) {
 
 func TestSupplierRouteValidationErrorsCarryRevision14SecurityHeaders(t *testing.T) {
 	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
-	supplieraccess.RegisterHandlers(api, nil, false)
+	supplieraccess.RegisterHandlers(api, nil, false, http.SameSiteLaxMode)
 	request := httptest.NewRequest(http.MethodPost,
 		"/supplier-access/challenges/verify",
 		bytes.NewBufferString(`{}`))

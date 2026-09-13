@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	platformmail "github.com/shananth/renovation-platform/backend/internal/platform/mail"
 	"github.com/shananth/renovation-platform/backend/internal/platform/secrets"
 	"github.com/shananth/renovation-platform/backend/internal/rfqissuance"
 )
@@ -493,6 +494,50 @@ func TestSendInvitationPersistsIntentThenSendsAndMarksSent(t *testing.T) {
 	if rig.invitations.stored[invitation.ID].Status != rfqissuance.InvitationStatusActive {
 		t.Errorf("Status = %q, want active after an explicit send",
 			rig.invitations.stored[invitation.ID].Status)
+	}
+}
+
+// TestSendInvitationTestSinkRewritesOnlyTransportRecipient mirrors
+// identity's TestSendRegistrationVerification_TestSinkRewritesOnlyTransportRecipient
+// and supplieraccess's TestCreateChallengeTestSinkRewritesOnlyTransportRecipient:
+// RFQ invitation delivery goes through the same shared mail.EmailSender
+// wiring, so a real platformmail.TestSinkSender wrap must redirect only the
+// transport copy while the persisted invitation/delivery records keep the
+// real supplier recipient.
+func TestSendInvitationTestSinkRewritesOnlyTransportRecipient(t *testing.T) {
+	svc, rig := newInvitationService(t)
+	ctx := context.Background()
+	rig.issuedChain(t, svc)
+
+	invitation, err := svc.CreateInvitation(ctx, "company-1", "user-1", createInvitationInput())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sink := platformmail.NewTestSinkSender(rig.mailer, "sink@example.com")
+	sunkSvc := rig.rebuild(t, rfqissuance.WithMailer(sink))
+
+	result, err := sunkSvc.SendInvitation(ctx, "company-1", "user-1",
+		rfqissuance.SendInvitationInput{InvitationID: invitation.ID, OperationID: "op-send-sink"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != rfqissuance.DeliveryStatusSent {
+		t.Errorf("Status = %q, want sent", result.Status)
+	}
+
+	// Transport recipient (what actually gets the email) is the sink.
+	if len(rig.mailer.sent) != 1 || rig.mailer.sent[0].To != "sink@example.com" {
+		t.Fatalf("expected the transport copy to go to the sink, got %+v", rig.mailer.sent)
+	}
+	// The real supplier recipient survives in the intended-recipient header.
+	if rig.mailer.sent[0].Headers["X-Renovex-Intended-Recipient"] != "sales@supplier.com" {
+		t.Fatalf("expected intended-recipient header to name the real supplier recipient, got %+v",
+			rig.mailer.sent[0].Headers)
+	}
+	// Logical/persisted recipient (delivery attempt + invitation record) is unaffected.
+	if len(rig.deliveries.stored) != 1 || rig.deliveries.stored[0].Status != rfqissuance.DeliveryStatusSent {
+		t.Fatalf("stored delivery attempt = %+v", rig.deliveries.stored)
 	}
 }
 

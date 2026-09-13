@@ -2,6 +2,7 @@ package composition_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestMilestone7HandlersShareOneSchemaRegistry(t *testing.T) {
 
 func TestSupplierMutationsUseOnlyTheCanonicalCSRFHeader(t *testing.T) {
 	_, api := platformhttp.NewRouter("M8 canonical CSRF", "test")
-	supplieraccess.RegisterHandlers(api, nil, false)
+	supplieraccess.RegisterHandlers(api, nil, false, http.SameSiteLaxMode)
 	supplieroffers.RegisterHandlers(api, nil)
 
 	document, err := json.Marshal(api.OpenAPI())
@@ -68,7 +69,7 @@ func TestMilestone8HandlersComposeWithUniqueRoutesAndDocumentedSecurity(t *testi
 
 	// Supplier routes are mounted on the base API because their cookie-backed
 	// authorization is enforced by Phase D, not contractor bearer middleware.
-	supplieraccess.RegisterHandlers(api, nil, false)
+	supplieraccess.RegisterHandlers(api, nil, false, http.SameSiteLaxMode)
 	supplieroffers.RegisterHandlers(api, nil)
 
 	authedAPI := huma.NewGroup(api)

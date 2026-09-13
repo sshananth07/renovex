@@ -64,7 +64,7 @@ func RegisterAllForSchema(api huma.API) {
 	identity.RegisterHandlers(api, nil, 0, true, http.SameSiteLaxMode, emptyOrigins)
 	identity.RegisterRegistrationVerificationHandlers(api, nil)
 
-	supplieraccess.RegisterHandlers(api, nil, false)
+	supplieraccess.RegisterHandlers(api, nil, false, http.SameSiteLaxMode)
 	rfqissuance.RegisterSupplierHandlers(api, nil)
 	supplieroffers.RegisterHandlers(api, nil)
 

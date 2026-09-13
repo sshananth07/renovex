@@ -734,6 +734,7 @@ func setProductionBaseEnv(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("APP_ALLOWED_ORIGINS", "https://app.example.com")
 	t.Setenv("AUTH_REFRESH_COOKIE_SECURE", "true")
+	t.Setenv("EXTERNAL_API_BASE_URL", "https://app.example.com")
 	t.Setenv("OBJECT_STORE_PROVIDER", "r2")
 	t.Setenv("R2_ACCOUNT_ID", "acct_1")
 	t.Setenv("R2_ACCESS_KEY_ID", "key_1")
@@ -774,6 +775,62 @@ func TestLoadFromEnvProductionWithRealAtlasURIAndR2Succeeds(t *testing.T) {
 
 	if _, err := LoadFromEnv(); err != nil {
 		t.Fatalf("unexpected error for a genuinely valid production config: %v", err)
+	}
+}
+
+// TestLoadFromEnvProductionRejectsLocalhostExternalAPIBaseURL guards against
+// exactly the bug this test exists for: EXTERNAL_API_BASE_URL is baked
+// directly into Supplier Invitation and Client Quotation portal links that
+// get emailed to real recipients. Its documented default
+// (http://localhost:3000) must never reach a production boot unnoticed —
+// production must fail fast rather than distribute an unreachable link.
+func TestLoadFromEnvProductionRejectsLocalhostExternalAPIBaseURL(t *testing.T) {
+	setProductionBaseEnv(t)
+	t.Setenv("EXTERNAL_API_BASE_URL", "http://localhost:3000")
+
+	if _, err := LoadFromEnv(); err == nil {
+		t.Fatal("expected production with a localhost EXTERNAL_API_BASE_URL to fail")
+	}
+}
+
+func TestLoadFromEnvProductionRejects127ExternalAPIBaseURL(t *testing.T) {
+	setProductionBaseEnv(t)
+	t.Setenv("EXTERNAL_API_BASE_URL", "http://127.0.0.1:3000")
+
+	if _, err := LoadFromEnv(); err == nil {
+		t.Fatal("expected production with a 127.0.0.1 EXTERNAL_API_BASE_URL to fail")
+	}
+}
+
+// TestLoadFromEnvProductionWithRealPublicURLSucceeds proves the guard is
+// specific to loopback hosts, not to EXTERNAL_API_BASE_URL generally: a
+// genuine production domain must boot cleanly.
+func TestLoadFromEnvProductionWithRealPublicURLSucceeds(t *testing.T) {
+	setProductionBaseEnv(t)
+	t.Setenv("EXTERNAL_API_BASE_URL", "https://app.renovex.example")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error for a genuine production EXTERNAL_API_BASE_URL: %v", err)
+	}
+	if cfg.ExternalAPIBaseURL != "https://app.renovex.example" {
+		t.Fatalf("expected the configured production URL to be used verbatim, got %q", cfg.ExternalAPIBaseURL)
+	}
+}
+
+// TestLoadFromEnvDevelopmentPermitsLocalhostExternalAPIBaseURL proves the
+// production-only guard does not leak into development, where localhost
+// links to a local Next.js dev server are the whole point.
+func TestLoadFromEnvDevelopmentPermitsLocalhostExternalAPIBaseURL(t *testing.T) {
+	setBaseEnv(t)
+	// APP_ENV unset -> defaults to development.
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error in development: %v", err)
+	}
+	if cfg.ExternalAPIBaseURL != "http://localhost:3000" {
+		t.Fatalf("expected the documented localhost default in development, got %q", cfg.ExternalAPIBaseURL)
 	}
 }
 

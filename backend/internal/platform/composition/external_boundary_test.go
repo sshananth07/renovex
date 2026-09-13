@@ -45,7 +45,7 @@ func TestComposedExternalRoutesApplyPrivacyHeadersToRealResponses(t *testing.T) 
 			externalSessionStoreStub{}, nil),
 		supplieraccess.WithSessionSecurity(sessionKeys),
 	)
-	supplieraccess.RegisterHandlers(api, supplierService, false)
+	supplieraccess.RegisterHandlers(api, supplierService, false, http.SameSiteLaxMode)
 	supplieroffers.RegisterHandlers(api, supplieroffers.NewService())
 
 	invitationToken := canonicalExternalToken(3)

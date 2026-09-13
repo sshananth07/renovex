@@ -61,7 +61,7 @@ func NewHTTPHandler(cfg config.Config, logger zerolog.Logger, mongoClient *mongo
 
 	secureSupplierCookies := cfg.AppEnv != "development" &&
 		cfg.AppEnv != "local" && cfg.AppEnv != "test"
-	supplieraccess.RegisterHandlers(api, services.SupplierAccess, secureSupplierCookies)
+	supplieraccess.RegisterHandlers(api, services.SupplierAccess, secureSupplierCookies, cfg.RefreshCookieSameSite)
 	rfqissuance.RegisterSupplierHandlers(api, services.RFQIssuance)
 	supplieroffers.RegisterHandlers(api, services.SupplierOffers)
 

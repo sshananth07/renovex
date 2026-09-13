@@ -289,7 +289,7 @@ func BuildRouterAndServicesWithMailerAndAIServiceURL(
 	// can exercise the same cookie flow wired by the shipping root.
 	identity.RegisterHandlers(api, services.Auth, int(testRefreshTokenTTL.Seconds()), false, http.SameSiteLaxMode, testOrigins)
 	identity.RegisterRegistrationVerificationHandlers(api, services.RegistrationVerification)
-	supplieraccess.RegisterHandlers(api, services.SupplierAccess, false)
+	supplieraccess.RegisterHandlers(api, services.SupplierAccess, false, http.SameSiteLaxMode)
 	rfqissuance.RegisterSupplierHandlers(api, services.RFQIssuance)
 	// Supplier Offer routes are protected by Phase D credentials rather than
 	// contractor auth, so they mount on the same unauthenticated base API.

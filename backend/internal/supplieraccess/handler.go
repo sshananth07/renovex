@@ -125,7 +125,16 @@ type bootstrapSupplierSessionOutput struct {
 // RegisterHandlers mounts Phase D's public Supplier security routes. Challenge
 // handles stay in request bodies so ordinary proxy-path logs never capture
 // them.
-func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
+// sameSite is the SameSite policy applied to every Supplier Access cookie
+// (exchange, session, CSRF). It must match identity's RefreshCookieSameSite
+// convention: Renovex's tester/production topology serves Web and the Go API
+// from two different Vercel domains (renovex-web.vercel.app,
+// renovex-api.vercel.app), which browsers treat as cross-site. A SameSite=Lax
+// cookie is never sent on the cross-site fetch() calls Web makes to the API,
+// so a hardcoded Lax cookie here would silently break every Supplier Access
+// flow in that exact topology while still working in same-site local dev —
+// which is why this must be configurable rather than fixed.
+func RegisterHandlers(api huma.API, service *Service, secureCookies bool, sameSite http.SameSite) {
 	supplierAPI := platformhttp.NewExternalGroup(api)
 	supplierAPI.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
 		// Huma handlers receive context.Context rather than *http.Request.
@@ -181,7 +190,7 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 				MaxAge:   int(result.ExpiresAt.Sub(openedAt) / time.Second),
 				HttpOnly: true,
 				Secure:   secureCookies,
-				SameSite: http.SameSiteLaxMode,
+				SameSite: sameSite,
 			},
 		}, nil
 	})
@@ -219,7 +228,7 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 				// single-use exchange.
 				return &verificationChallengeOutput{
 					Status:         http.StatusServiceUnavailable,
-					SetCookie:      expiredAccessExchangeCookie(secureCookies),
+					SetCookie:      expiredAccessExchangeCookie(secureCookies, sameSite),
 					CacheControl:   supplierNoStore,
 					Pragma:         "no-cache",
 					ReferrerPolicy: "no-referrer",
@@ -233,7 +242,7 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 				// An invalid or expired exchange cannot become usable later;
 				// remove its browser credential while preserving the same
 				// neutral public response used for every credential failure.
-				expiredCookie := expiredAccessExchangeCookie(secureCookies)
+				expiredCookie := expiredAccessExchangeCookie(secureCookies, sameSite)
 				publicError = huma.ErrorWithHeaders(publicError, http.Header{
 					"Set-Cookie": []string{expiredCookie.String()},
 				})
@@ -242,7 +251,7 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 		}
 		return &verificationChallengeOutput{
 			Status:         http.StatusCreated,
-			SetCookie:      expiredAccessExchangeCookie(secureCookies),
+			SetCookie:      expiredAccessExchangeCookie(secureCookies, sameSite),
 			CacheControl:   supplierNoStore,
 			Pragma:         "no-cache",
 			ReferrerPolicy: "no-referrer",
@@ -304,10 +313,10 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 			SetCookie: []http.Cookie{
 				supplierSessionCookie(
 					result.SessionToken, result.SlidingExpiresAt,
-					verifiedAt, secureCookies),
+					verifiedAt, secureCookies, sameSite),
 				supplierCSRFCookie(
 					result.CSRFToken, result.SlidingExpiresAt,
-					verifiedAt, secureCookies),
+					verifiedAt, secureCookies, sameSite),
 			},
 			CacheControl:   supplierNoStore,
 			Pragma:         "no-cache",
@@ -342,7 +351,7 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 			SetCookie: supplierSessionCookie(
 				authorized.SessionCookieRenewal.Token,
 				authorized.SessionCookieRenewal.ExpiresAt,
-				accessedAt, secureCookies),
+				accessedAt, secureCookies, sameSite),
 			CacheControl:   supplierNoStore,
 			Pragma:         "no-cache",
 			ReferrerPolicy: "no-referrer",
@@ -377,8 +386,8 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool) {
 		return &logoutSupplierSessionOutput{
 			Status: http.StatusNoContent,
 			SetCookie: []http.Cookie{
-				expiredSupplierSessionCookie(secureCookies),
-				expiredSupplierCSRFCookie(secureCookies),
+				expiredSupplierSessionCookie(secureCookies, sameSite),
+				expiredSupplierCSRFCookie(secureCookies, sameSite),
 			},
 			CacheControl:   supplierNoStore,
 			Pragma:         "no-cache",
@@ -441,29 +450,29 @@ func challengeResponseBody(
 	}
 }
 
-func expiredAccessExchangeCookie(secure bool) http.Cookie {
+func expiredAccessExchangeCookie(secure bool, sameSite http.SameSite) http.Cookie {
 	return http.Cookie{
 		Name: AccessExchangeCookieName, Value: "",
 		Path: supplierAccessCookiePath, Domain: "",
 		Expires: time.Unix(1, 0).UTC(), MaxAge: -1,
-		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: secure, SameSite: sameSite,
 	}
 }
 
 func supplierSessionCookie(rawToken string, expiresAt, now time.Time,
-	secure bool) http.Cookie {
+	secure bool, sameSite http.SameSite) http.Cookie {
 	return supplierCredentialCookie(
-		SupplierSessionCookieName, rawToken, expiresAt, now, true, secure)
+		SupplierSessionCookieName, rawToken, expiresAt, now, true, secure, sameSite)
 }
 
 func supplierCSRFCookie(rawToken string, expiresAt, now time.Time,
-	secure bool) http.Cookie {
+	secure bool, sameSite http.SameSite) http.Cookie {
 	return supplierCredentialCookie(
-		SupplierCSRFCookieName, rawToken, expiresAt, now, false, secure)
+		SupplierCSRFCookieName, rawToken, expiresAt, now, false, secure, sameSite)
 }
 
 func supplierCredentialCookie(name, value string, expiresAt, now time.Time,
-	httpOnly, secure bool) http.Cookie {
+	httpOnly, secure bool, sameSite http.SameSite) http.Cookie {
 	maxAge := int(expiresAt.Sub(now) / time.Second)
 	if maxAge < 1 {
 		maxAge = 1
@@ -473,26 +482,26 @@ func supplierCredentialCookie(name, value string, expiresAt, now time.Time,
 		Path: supplierAccessCookiePath, Domain: "",
 		Expires: expiresAt, MaxAge: maxAge,
 		HttpOnly: httpOnly, Secure: secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 	}
 }
 
-func expiredSupplierSessionCookie(secure bool) http.Cookie {
+func expiredSupplierSessionCookie(secure bool, sameSite http.SameSite) http.Cookie {
 	return expiredSupplierCredentialCookie(
-		SupplierSessionCookieName, true, secure)
+		SupplierSessionCookieName, true, secure, sameSite)
 }
 
-func expiredSupplierCSRFCookie(secure bool) http.Cookie {
+func expiredSupplierCSRFCookie(secure bool, sameSite http.SameSite) http.Cookie {
 	return expiredSupplierCredentialCookie(
-		SupplierCSRFCookieName, false, secure)
+		SupplierCSRFCookieName, false, secure, sameSite)
 }
 
-func expiredSupplierCredentialCookie(name string, httpOnly, secure bool) http.Cookie {
+func expiredSupplierCredentialCookie(name string, httpOnly, secure bool, sameSite http.SameSite) http.Cookie {
 	return http.Cookie{
 		Name: name, Value: "",
 		Path: supplierAccessCookiePath, Domain: "",
 		Expires: time.Unix(1, 0).UTC(), MaxAge: -1,
 		HttpOnly: httpOnly, Secure: secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 	}
 }

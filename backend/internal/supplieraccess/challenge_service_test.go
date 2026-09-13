@@ -272,6 +272,59 @@ func TestCreateChallengePersistsVerifierBeforeSendingAndConsumesExchange(t *test
 	}
 }
 
+// TestCreateChallengeTestSinkRewritesOnlyTransportRecipient mirrors
+// identity's TestSendRegistrationVerification_TestSinkRewritesOnlyTransportRecipient:
+// the supplier-portal OTP flow must go through the same shared
+// mail.EmailSender wiring, so wrapping the mailer in a real
+// platformmail.TestSinkSender must redirect only the outbound transport
+// copy while every persisted record (challenge, delivery attempt) keeps
+// the real supplier recipient.
+func TestCreateChallengeTestSinkRewritesOnlyTransportRecipient(t *testing.T) {
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	rig := newChallengeServiceRig(t, now)
+	sink := platformmail.NewTestSinkSender(rig.mailer, "sink@example.com")
+	rig.service = supplieraccess.NewService(
+		supplieraccess.WithInvitationAccess(rig.access, rig.access),
+		supplieraccess.WithAccessExchangeStore(rig.exchanges),
+		supplieraccess.WithOpaqueTokenGenerator(supplieraccess.CryptographicOpaqueTokenGenerator{}),
+		supplieraccess.WithVerificationStores(rig.challenges, rig.deliveries),
+		supplieraccess.WithVerificationSecurity(rig.codeKeys, rig.fingerprints,
+			supplieraccess.NewVerificationRateLimiter(rig.rates, supplieraccess.CryptographicOpaqueTokenGenerator{})),
+		supplieraccess.WithVerificationMailer(sink),
+	)
+	ctx := context.Background()
+
+	result, err := rig.service.CreateChallenge(ctx, supplieraccess.CreateChallengeInput{
+		ExchangeToken: rig.rawExchangeToken,
+		OperationID:   "challenge-operation-sink",
+		ClientAddress: netip.MustParseAddr("198.51.100.20"),
+		RequestedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("creating challenge: %v", err)
+	}
+
+	// Transport recipient (what actually gets the email) is the sink.
+	if len(rig.mailer.messages) != 1 || rig.mailer.messages[0].To != "sink@example.com" {
+		t.Fatalf("expected the transport copy to go to the sink, got %+v", rig.mailer.messages)
+	}
+	// The real recipient survives in the intended-recipient header.
+	if rig.mailer.messages[0].Headers["X-Renovex-Intended-Recipient"] != rig.exchange.NormalizedRecipientEmail {
+		t.Fatalf("expected intended-recipient header to name the real supplier recipient, got %+v",
+			rig.mailer.messages[0].Headers)
+	}
+	// Logical recipient (persisted domain state) remains the real supplier contact.
+	challenge, err := rig.challenges.FindChallenge(ctx, result.ChallengeID)
+	if err != nil {
+		t.Fatalf("loading challenge: %v", err)
+	}
+	delivery, err := rig.deliveries.FindAttemptByOperation(
+		ctx, challenge.CompanyID, challenge.ID, challenge.ChallengeOperationID)
+	if err != nil || delivery.Status != supplieraccess.VerificationDeliverySent {
+		t.Fatalf("delivery/error = %#v/%v", delivery, err)
+	}
+}
+
 func TestResendUsesSameCodeWithoutChangingChallengeAndIsOperationIdempotent(t *testing.T) {
 	now := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
 	rig := newChallengeServiceRig(t, now)
