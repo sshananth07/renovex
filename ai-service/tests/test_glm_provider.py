@@ -9,6 +9,7 @@ attempts total, bounded backoff) — see the retry-specific tests below."""
 
 import json
 import logging
+import re
 
 import httpx
 import pytest
@@ -830,3 +831,168 @@ class TestEmptyContentThinkingBudgetDiagnostics:
         assert "finish_reason=stop" in caplog.text
         assert "reasoning_content_present=False" in caplog.text
         assert "completion_tokens=50" in caplog.text
+
+
+class TestStructuralFingerprintDiagnostics:
+    """Task 1 — structural fingerprint diagnostics (diagnostic-only, no
+    behavior change). We currently infer a schema_validation failure's
+    shape from the ABSENCE of expected fields rather than observing the
+    actual structure. This adds a fingerprint of the parsed response —
+    key names and value TYPES only, never values — to
+    glm_spatial_post_success_failure, plus reasoning_tokens (from
+    usage.completion_tokens_details.reasoning_tokens when present) and
+    finish_reason on every failure stage where a response body exists."""
+
+    def test_schema_validation_failure_logs_fingerprint_of_parsed_object(self, caplog):
+        """The core acceptance case: a parsed JSON object that is
+        STRUCTURALLY wrong (e.g. wrapped, or a differently-shaped refusal
+        object) must have its key-only shape logged so the actual shape
+        can be read from logs instead of inferred from missing fields."""
+        wrapped = {"result": {"outcome": "blocked", "reason": "no matching operation"}}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response(json.dumps(wrapped))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=schema_validation" in caplog.text
+        assert "fingerprint=" in caplog.text
+        # Key names are safe and must appear.
+        assert "result" in caplog.text
+        assert "outcome" in caplog.text
+        assert "reason" in caplog.text
+        # Values must NEVER appear.
+        assert "blocked" not in caplog.text
+        assert "no matching operation" not in caplog.text
+
+    def test_fingerprint_never_contains_values_only_key_names_and_types(self, caplog):
+        """Blanket safety net across a deliberately tempting nested shape
+        with realistic-looking sensitive-shaped values."""
+        bad = {
+            "schemaVersion": 1,
+            "target": {"kind": "object", "id": "SENSITIVE_ID_MARKER"},
+            "summary": ["SENSITIVE_SUMMARY_TEXT"],
+            "notAField": "SENSITIVE_STRAY_VALUE",
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response(json.dumps(bad))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "SENSITIVE_ID_MARKER" not in caplog.text
+        assert "SENSITIVE_SUMMARY_TEXT" not in caplog.text
+        assert "SENSITIVE_STRAY_VALUE" not in caplog.text
+        # Key names ARE safe and expected.
+        assert "schemaVersion" in caplog.text
+        assert "notAField" in caplog.text
+
+    def test_fingerprint_bounded_depth_on_deeply_nested_object(self, caplog):
+        """fingerprint() must never raise or hang on deep nesting — bounded
+        at max_depth, replacing anything past it with a safe placeholder."""
+        deeply_nested = {"a": {"b": {"c": {"d": {"e": {"f": "leaf-value-must-not-leak"}}}}}}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response(json.dumps(deeply_nested))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "fingerprint=" in caplog.text
+        assert "leaf-value-must-not-leak" not in caplog.text
+
+    def test_fingerprint_truncated_at_byte_cap_on_pathological_response(self, caplog):
+        """A response with a huge number of distinct top-level keys must
+        not flood the log — the serialised fingerprint is capped at a
+        fixed byte budget."""
+        pathological = {f"field_{i}": i for i in range(2000)}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response(json.dumps(pathological))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        # Find the fingerprint segment of the log line and confirm it's bounded.
+        match = re.search(r"fingerprint=(\S.*?)(?: reasoning_tokens=|$)", caplog.text, re.DOTALL)
+        assert match is not None
+        assert len(match.group(1).encode("utf-8")) <= 2048 + 64  # small slack for a truncation marker
+
+    def test_fingerprint_never_raises_and_logs_fingerprint_error_on_unfingerprintable_input(self, caplog, monkeypatch):
+        """fingerprint() itself must be wrapped: if it somehow raises, the
+        failure-stage log must still emit (with fingerprint_error=<class>)
+        rather than losing the whole diagnostic line or propagating a
+        second, unrelated exception out of a logging call."""
+        import app.providers.glm as glm_module
+
+        def _broken_fingerprint(*args, **kwargs):
+            raise RuntimeError("simulated fingerprint failure")
+
+        monkeypatch.setattr(glm_module, "fingerprint", _broken_fingerprint)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            bad = dict(VALID_DELTA)
+            bad["unexpectedField"] = "x"
+            return _chat_completions_response(json.dumps(bad))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=schema_validation" in caplog.text
+        assert "fingerprint_error=RuntimeError" in caplog.text
+
+    def test_empty_content_diagnostic_already_logs_finish_reason(self, caplog):
+        """Sanity check: finish_reason must be present on the empty_content
+        path (this was already true before Task 1; Task 1 must not
+        regress it)."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"choices": [{"message": {"content": ""}, "finish_reason": "length"}]})
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=empty_content" in caplog.text
+        assert "finish_reason=length" in caplog.text
+
+    def test_reasoning_tokens_logged_when_present_in_usage_details(self, caplog):
+        def handler(request: httpx.Request) -> httpx.Response:
+            bad = dict(VALID_DELTA)
+            bad["unexpectedField"] = "x"
+            body = {
+                "choices": [{"message": {"content": json.dumps(bad)}, "finish_reason": "stop"}],
+                "usage": {
+                    "completion_tokens": 1091,
+                    "prompt_tokens": 400,
+                    "total_tokens": 1491,
+                    "completion_tokens_details": {"reasoning_tokens": 950},
+                },
+            }
+            return httpx.Response(200, json=body)
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=schema_validation" in caplog.text
+        assert "reasoning_tokens=950" in caplog.text
+
+    def test_reasoning_tokens_absent_when_usage_details_missing(self, caplog):
+        def handler(request: httpx.Request) -> httpx.Response:
+            bad = dict(VALID_DELTA)
+            bad["unexpectedField"] = "x"
+            return _chat_completions_response(json.dumps(bad))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "reasoning_tokens=None" in caplog.text
