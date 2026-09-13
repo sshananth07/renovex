@@ -61,6 +61,16 @@ logger = logging.getLogger(__name__)
 _TRANSIENT_OVERLOAD_PROVIDER_CODE = "1305"
 _TRANSIENT_OVERLOAD_HTTP_STATUS = 429
 
+# A slow/unreachable TCP connect and a slow Z.ai RESPONSE are different
+# failure modes — the production timeout that motivated GLM_TIMEOUT_SECONDS'
+# 90s default was the response taking too long (duration_ms=30078 at the
+# old 30s ceiling), not a slow connection. Z.ai is a stable, generally-fast-
+# to-reach host, so connect keeps a much shorter, fixed ceiling regardless
+# of how high the overall read timeout is configured — a genuinely
+# unreachable host should still fail fast rather than waiting the full
+# (now much longer) read timeout.
+_CONNECT_TIMEOUT_SECONDS = 10.0
+
 # Bounded retry: at most 2 retries after the initial request (3 attempts
 # total). Backoff is ~1s then ~2s plus a small jitter, UNLESS Z.ai's own
 # Retry-After header is present on that response, which then takes
@@ -181,8 +191,14 @@ class GLMProvider:
         # follow_redirects=False and no transport-level retry policy: a
         # single non-streaming POST, no more. transport is injectable for
         # httpx.MockTransport in tests; production leaves it unset (real
-        # network transport).
-        self._client = httpx.Client(timeout=timeout, follow_redirects=False, transport=transport)
+        # network transport). connect keeps its own short, fixed ceiling
+        # (_CONNECT_TIMEOUT_SECONDS) independent of the caller-configured
+        # overall/read timeout — see that constant's own doc comment.
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(timeout, connect=_CONNECT_TIMEOUT_SECONDS),
+            follow_redirects=False,
+            transport=transport,
+        )
 
     def reason_element_from_raw(self, raw: dict) -> SpatialReasoningResult:
         """Validates raw input into SpatialReasoningRequest BEFORE any HTTP
