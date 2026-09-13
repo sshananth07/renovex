@@ -471,3 +471,112 @@ def test_invalid_local_input_makes_zero_calls():
     with pytest.raises(InvalidAIRequest):
         provider.reason_element_from_raw({**FIXTURE_REQUEST, "instruction": ""})
     assert counter.count == 0
+
+
+class TestPostSuccessFailureStageDiagnostics:
+    """Root-cause instrumentation only: a 200 from Z.ai can still fail
+    LOCALLY at one of several distinct parsing/validation stages inside
+    reason_element, and every one of them currently raises the SAME
+    InvalidProviderResponse with no way to tell them apart from logs.
+    These tests pin a distinct, safe `stage` name logged at each site —
+    behavior (the raised exception, its message, retry count) must stay
+    completely unchanged; only a new log line is added per stage."""
+
+    def test_envelope_extraction_stage_logged_on_missing_message_shape(self, caplog):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"choices": [{"message": {}}]})
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_failure" in caplog.text
+        assert "stage=envelope_extraction" in caplog.text
+        assert "turn_id=turn_002" in caplog.text
+        assert "attempt=1" in caplog.text
+
+    def test_empty_content_stage_logged(self, caplog):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response("")
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=empty_content" in caplog.text
+
+    def test_content_json_decode_stage_logged(self, caplog):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response("not json at all {{{")
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=content_json_decode" in caplog.text
+        # The raw unparseable content must never appear in the log.
+        assert "not json at all" not in caplog.text
+
+    def test_schema_validation_stage_logged_with_field_paths_only(self, caplog):
+        """This is the leading hypothesis for the production failure: an
+        instruction with no valid spatial-operation mapping (e.g. "move to
+        the right edge") plausibly produces a spatial.spec that fails
+        ProposedSceneEditDelta's closed discriminated union. The log must
+        carry ONLY field/location paths from the Pydantic error — never
+        pydantic's full errors() objects (which embed the offending input
+        value) and never the raw response content."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            bad = dict(VALID_DELTA)
+            bad["unexpectedField"] = "this-should-never-appear-in-logs"
+            return _chat_completions_response(json.dumps(bad))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=schema_validation" in caplog.text
+        assert "unexpectedField" in caplog.text  # the field PATH is safe and useful
+        assert "this-should-never-appear-in-logs" not in caplog.text  # the offending VALUE is not
+
+    def test_target_mismatch_stage_logged(self, caplog):
+        def handler(request: httpx.Request) -> httpx.Response:
+            mismatched = dict(VALID_DELTA)
+            mismatched["target"] = {"kind": "object", "id": "object_other_999"}
+            return _chat_completions_response(json.dumps(mismatched))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "stage=target_mismatch" in caplog.text
+
+    def test_diagnostic_logging_never_leaks_secrets_or_content(self, caplog):
+        """Blanket safety net across every stage: API key, Authorization
+        header, instruction text, and raw content must never appear."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response("garbage-content-marker {{{")
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING), pytest.raises(InvalidProviderResponse):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "test-glm-key" not in caplog.text
+        assert "Bearer" not in caplog.text
+        assert "garbage-content-marker" not in caplog.text
+        assert FIXTURE_REQUEST["instruction"] not in caplog.text
+
+    def test_success_path_logs_no_failure_stage(self, caplog):
+        """A successful parse/validation must not emit any post-success
+        failure-stage log — this instrumentation is diagnostic-only for
+        the failure paths, never noise on the happy path."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _chat_completions_response(json.dumps(VALID_DELTA))
+
+        provider = _provider_with_transport(handler)
+        with caplog.at_level(logging.WARNING):
+            provider.reason_element(SpatialReasoningRequest(**FIXTURE_REQUEST))
+
+        assert "glm_spatial_post_success_failure" not in caplog.text
