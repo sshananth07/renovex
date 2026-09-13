@@ -13,12 +13,18 @@ import type { ComparisonMode, StudioState } from "./types";
 // server data — see conceptProjection.ts for the read side of that
 // derivation.
 //
-// One session/turn/attempt triple is tracked PER canonical target
-// {kind,id} — switching the RoomDraft selection to a different supported
-// element must restore or start THAT element's own session, never carry
-// over the previous element's prompt draft, comparison mode, or attempt.
+// One session/turn/attempt triple is tracked PER canonical session context
+// {kind,id,revision} — switching the RoomDraft selection to a different
+// supported element, OR the RoomDraft advancing to a new revision under the
+// SAME element, must restore or start a session for that new context, never
+// carry over the previous context's prompt draft, comparison mode, attempt,
+// or (critically) sessionId. A session is revision-bound server-side
+// (SpatialDesignSession.BasedOnRoomDraftRevision) — reusing a tracked
+// sessionId/clientSessionId across a revision change is exactly the bug
+// this contextKey closes (see AIDesignStudio.tsx's sessionContextKey).
 type SessionTracking = {
   target: Selection;
+  contextKey: string | null;
   sessionId: string | null;
   activeTurnId: string | null;
   activeAttemptId: string | null;
@@ -33,7 +39,7 @@ type StudioUiState = {
 };
 
 type StudioAction =
-  | { type: "selectTarget"; target: Selection }
+  | { type: "selectTarget"; target: Selection; contextKey: string | null }
   | { type: "setPromptDraft"; value: string }
   | { type: "clearPromptDraft" }
   | { type: "restoreSession"; sessionId: string; activeTurnId: string | null; activeAttemptId: string | null }
@@ -50,13 +56,16 @@ type StudioAction =
 function reducer(state: StudioUiState, action: StudioAction): StudioUiState {
   switch (action.type) {
     case "selectTarget": {
-      // A genuinely new/different target always starts fresh — no prompt
-      // draft, comparison mode, or attempt carries over from a previously
-      // selected element (plan's explicit "selecting object B clears A's
-      // temporary concept and starts/restores B independently").
-      if (sameTarget(state.tracking?.target ?? null, action.target)) return state;
+      // A genuinely new session context — a different target OR the same
+      // target at a new RoomDraft revision — always starts fresh — no
+      // prompt draft, comparison mode, attempt, or (critically) sessionId
+      // carries over (plan's explicit "selecting object B clears A's
+      // temporary concept and starts/restores B independently", extended to
+      // a revision bump under the SAME target — see SessionTracking's doc
+      // comment).
+      if (state.tracking?.contextKey === action.contextKey) return state;
       return {
-        tracking: action.target ? { target: action.target, sessionId: null, activeTurnId: null, activeAttemptId: null } : null,
+        tracking: action.target ? { target: action.target, contextKey: action.contextKey, sessionId: null, activeTurnId: null, activeAttemptId: null } : null,
         promptDraft: "",
         comparisonMode: "current",
         collapsed: state.collapsed,
@@ -106,11 +115,6 @@ function reducer(state: StudioUiState, action: StudioAction): StudioUiState {
   }
 }
 
-function sameTarget(a: Selection, b: Selection): boolean {
-  if (a === null || b === null) return a === b;
-  return a.kind === b.kind && a.id === b.id;
-}
-
 const initialState: StudioUiState = {
   tracking: null,
   promptDraft: "",
@@ -122,7 +126,10 @@ const initialState: StudioUiState = {
 export function useDesignStudio() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const selectTarget = useCallback((target: Selection) => dispatch({ type: "selectTarget", target }), []);
+  const selectTarget = useCallback(
+    (target: Selection, contextKey: string | null) => dispatch({ type: "selectTarget", target, contextKey }),
+    [],
+  );
   const setPromptDraft = useCallback((value: string) => dispatch({ type: "setPromptDraft", value }), []);
   const clearPromptDraft = useCallback(() => dispatch({ type: "clearPromptDraft" }), []);
   const restoreSession = useCallback(
