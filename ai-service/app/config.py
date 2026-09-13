@@ -28,9 +28,14 @@ class Settings(BaseSettings):
     # Step 2).
     SPATIAL_AI_PROVIDER: str = "mock"
     GLM_API_KEY: str = ""
-    GLM_MODEL: str = "glm-5.3"
+    GLM_MODEL: str = "glm-4.7-flash"
     GLM_BASE_URL: str = "https://api.z.ai/api/paas/v4"
-    GLM_TIMEOUT_SECONDS: float = 30.0
+    # 90s (up from the original 30s): production evidence showed a valid
+    # request timing out at exactly the 30s default
+    # (glm_spatial_request_failed duration_ms=30078) — Z.ai occasionally
+    # needs longer than 30s under glm-4.7-flash even for a successful
+    # response. Still fully overridable via GLM_TIMEOUT_SECONDS.
+    GLM_TIMEOUT_SECONDS: float = 90.0
     GLM_MAX_OUTPUT_TOKENS: int = 2000
     GLM_REASONING_EFFORT: str = "low"
 
