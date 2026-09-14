@@ -22,9 +22,13 @@ Architecture and technical decisions are recorded in:
 TypeScript frontend, Python (FastAPI) AI service, MongoDB. Local development runs via
 Docker Compose (MongoDB + Mailpit) with every provider defaulting to mock/offline, so the
 app never requires a real AI/cloud credential to run or test locally. **The production/
-tester deployment target is Vercel (Web + Go API) + MongoDB Atlas + Cloudflare R2 +
-external AI providers** — see "Deployment topology" below; do not assume this project has
-no external cloud dependency in production.
+tester deployment target is three independently deployed Vercel projects — `api`
+(`backend/`), `web` (`apps/web/`), `ai-service` (`ai-service/`) — plus MongoDB Atlas,
+Cloudflare R2, and Resend as external managed services.** See "Deployment topology"
+below and [`README.md`](README.md)'s "Deploying to production" for the full per-service
+provisioning/env-var walkthrough; do not assume this project has no external cloud
+dependency in production, and do not assume the three services share a single deploy
+step — they don't.
 
 **Backend module boundaries** (see ADR 0002): `internal/foundation` holds business
 primitives (Money, Quantity) with zero infrastructure dependencies. `internal/platform`
@@ -44,30 +48,46 @@ approves. AI-generated data lives in `ai_suggestions` (pending/accepted/modified
 until a human approves it — it never silently becomes authoritative domain data, and it
 never performs authoritative financial or quantity calculations.
 
+**Domain map** — `phase1.md` has 66 numbered sections; the ones an agent will most often
+need are: §1 core domain model, §2 identity/access grants, §5–8 project/property/space/
+work-item structure, §12 supplier directory, §17–22 resource/cost/estimate model, §23–31
+customer-facing quotation + portal + acceptance, §32–39 material requirements through
+Supplier RFQ/offers (§33.1–33.3 cover RFQ invitation and secure-link delivery
+specifically), §40–43 actual-cost tracking and profitability, §51–54 financial-integrity/
+schema-versioning/idempotency/concurrency invariants that apply repo-wide, §61–63 the AI
+and technical architecture chapters. Read the specific section a task touches rather than
+the whole document when context budget matters, but §51–54's invariants apply regardless
+of which section a task is otherwise scoped to.
+
 **This project must remain fully local — do not run any git command** (`init`, `add`,
 `commit`, etc.) or assume a git repository exists here unless explicitly asked. Some
 tooling initializes git as a side effect (e.g. `create-next-app`); remove any `.git`
 directory it creates immediately.
 
-**Current state:** Milestone 0 (project foundation) is complete — see `tasks/done.md` for
-what's built. Milestone 1 (Identity and Tenancy: User, Company, Company Membership, JWT
-auth, tenant-scoped authorization) is next per the milestone ordering in the Milestone 0
-plan.
+**Current state:** this codebase is well past initial scaffolding — identity/tenancy,
+projects/clients/properties/spaces/work-items, costing/estimates/quotations, RFQ
+issuance, Supplier Access (OTP-gated portal, session + CSRF cookies), Supplier Offers,
+Awards, spatial/3D design generation, and the M8.5C Vercel/Atlas/R2/Resend production
+deployment are all implemented and live in production as of this writing. Do not assume
+an early-milestone state or re-derive "what milestone are we on" from a stale note — read
+`docs/superpowers/plans/` for the actual milestone-by-milestone build history, and prefer
+`git log`/the current code over any single stale summary line (including this one) for
+what's actually built today.
 
 ---
 
 ## Deployment topology (M8.5C)
 
-Production/tester intended topology — not yet provisioned on GitHub/Vercel as of this
-writing; this describes the target the codebase is already built for:
+This is live, provisioned infrastructure (`renovex-api`, `renovex-web`, and a third
+Vercel project for `ai-service`), not a future target:
 
 ```
-Web (Next.js, Vercel)
-    ↓
-Go API (Vercel serverless function, api/index.go)
+Web (Next.js, Vercel project rooted at apps/web/)
+    ↓ browser calls the API directly — no Next.js proxy layer
+Go API (Vercel project rooted at backend/, Go framework preset)
     ├── MongoDB Atlas
     ├── Cloudflare R2 (sole durable object store — OBJECT_STORE_PROVIDER=r2 required)
-    └── Python AI service (FastAPI, its own deployment)
+    └── Python AI service (Vercel project rooted at ai-service/, FastAPI)
             ├── GLM reasoning provider (spatial design reasoning)
             ├── Cloudflare Workers AI / FLUX (reference-image generation)
             └── Hugging Face Hunyuan3D Space (3D asset generation)
@@ -82,48 +102,94 @@ fallback — if Vercel Queue is genuinely unavailable at deployment time, that i
 deployment-time decision, not something this codebase should silently substitute.
 ```
 
+**Go entrypoint note:** `backend/api/` is currently an empty directory (there is no
+`api/index.go`) and `backend/vercel.json` declares no custom `functions`/`rewrites`
+block — this is intentional, a deliberate fix to a prior deployment issue, and the live
+`api` deployment builds and serves correctly as-is. `backend/cmd/api/main.go` remains
+this repo's Go application entrypoint (used for local dev and by CI). Vercel's own
+internal mechanism for building/serving this project from its Go framework preset with
+no custom `api/*.go` handler is platform-managed and not verified or controlled by
+anything in this repo — do not assume `api/index.go` exists, and do not restore it or
+add a `functions`/`rewrites` block "to fix" the deployment without first confirming with
+the user that something is actually broken, since the current empty-`api/`-directory
+setup is the working, intended state.
+
+**Cross-origin cookies:** `web` and `api` are two different Vercel domains, which
+browsers treat as cross-site. Any cookie set by `api` that must be usable by a
+cross-site `fetch()` from `web` (the Supplier Access session/CSRF cookies, the auth
+refresh cookie) needs `SameSite=None` **and** `Secure=true` together — `SameSite=None`
+without `Secure` is spec-invalid and browsers silently drop the cookie with no error.
+`AUTH_REFRESH_COOKIE_SAME_SITE=none` / `AUTH_REFRESH_COOKIE_SECURE=true` in production
+is not optional hardening, it is required for login and Supplier Access to function at
+all in this topology. Separately: a cookie set by `api`'s origin is never readable via
+`document.cookie` from JavaScript running on `web`'s origin — that is a hard, unconditional
+same-origin browser rule with no `SameSite`/`Secure`/`Domain` workaround. Where the
+frontend needs a cookie's value in JS (e.g. the Supplier Access CSRF double-submit
+token), the value must be delivered through a JSON response body instead, and held in
+frontend memory/state rather than re-read from `document.cookie`.
+
 `AI_PROVIDER=mock`/local providers remain the default for **local development and tests
 only** — see "Deployment env matrix" below for what production requires instead.
 
-### Deployment env matrix
+### Deployment env matrix (per service)
 
-Full detail lives in each `.env.example` (root = Go, `ai-service/.env.example` = Python,
-`apps/web/.env.local.example` = Web) — this is the ownership/visibility summary. "Web" here
-always means public `NEXT_PUBLIC_*` config; the Go API is the only component that ever
-holds Mongo/R2/AI-provider/email secrets.
+Full detail with local-dev defaults and inline rationale lives in each service's own
+`.env.example`: root `.env.example` (`api`), `ai-service/.env.example` (`ai-service`),
+`apps/web/.env.local.example` (`web`). Below is the ownership/visibility summary, split
+by the three independently deployed Vercel projects. Critical boundary: `web` never
+holds a Mongo password, R2 secret, AI provider secret, Hugging Face secret, or Resend
+secret; `ai-service` never receives Mongo credentials at all.
 
-| Variable | Owner | Required in prod? | Secret? | Purpose |
-|---|---|---|---|---|
-| `MONGO_URI` | Go | Yes (must not be localhost/127.0.0.1) | Secret | Atlas connection string |
-| `MONGO_DATABASE` | Go | Yes | Public | Database name |
-| `OBJECT_STORE_PROVIDER` | Go | Yes, must be `r2` | Public | Selects R2 vs local filesystem |
-| `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/`R2_BUCKET`/`R2_ENDPOINT` | Go | Yes (together) when `OBJECT_STORE_PROVIDER=r2` | Secret | R2 object storage credentials |
-| `AI_SERVICE_URL` | Go | Optional (required together with `AI_INTERNAL_TOKEN` if AI Project Setup is enabled) | Public | Go→Python base URL |
-| `AI_INTERNAL_TOKEN` | Go + Python | Optional (as above) | Secret | Go↔Python shared bearer token |
-| `HUGGINGFACE_SPACE_URL`/`HUGGINGFACE_TOKEN` | Go | Optional (together; required if 3D asset generation is enabled) | Secret (token) | Go→Hunyuan Gradio Space |
-| `HUNYUAN_PROVIDER_TIMEOUT` | Go | Optional (defaults 9m) | Public | Hunyuan call timeout |
-| `EMAIL_PROVIDER` | Go | Should be `resend` in prod | Public | smtp vs resend transport |
-| `EMAIL_DELIVERY_MODE` | Go | Must be `direct` in prod (fatal if `test_sink`) | Public | direct vs test-sink routing |
-| `EMAIL_TEST_SINK_ADDRESS` | Go | Tester-only | Public (an inbox address) | test_sink transport recipient |
-| `RESEND_API_KEY` | Go | Yes when `EMAIL_PROVIDER=resend` | Secret | Resend API key |
-| `RESEND_FROM` | Go | Yes when `EMAIL_PROVIDER=resend` | Public | From address |
-| `APP_ALLOWED_ORIGINS` | Go | Yes (https only) | Public | CORS/cookie origin allowlist |
-| `AUTH_REFRESH_COOKIE_SECURE` / `AUTH_REFRESH_COOKIE_SAME_SITE` | Go | `true` / `none` for cross-site prod | Public | Refresh cookie Secure and SameSite flags |
-| `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` | Go | Yes | Secret | Session signing |
-| `INVITATION_SECRET_KEY_V*` / Phase D supplier keyrings | Go | Yes if those features are used | Secret | HMAC-derived credential keys |
-| `SPATIAL_WORKER_TOKEN` | Go + Web (server-side) | Optional (enables internal worker routes) | Secret | Protects internal process-one routes |
-| `SPATIAL_QUEUE_ENQUEUE_URL`/`SPATIAL_QUEUE_ENQUEUE_TOKEN` | Go + Web (server-side) | Required together for Vercel Queue wake | Secret (token) | Go↔Web Queue bridge |
-| `SERVERLESS_MODE` | Go | `true` on Vercel | Public | Disables the in-process ticker |
-| `NEXT_PUBLIC_API_BASE_URL` | Web | Yes | Public | Browser→Go API base URL |
-| `SPATIAL_API_INTERNAL_URL` | Web (server-side) | Optional | Public | Web-server→Go internal URL |
-| `ENVIRONMENT` | Python | Should be `production` in prod | Public | Enables T2D fail-fast provider guard |
-| `AI_PROVIDER`/`SPATIAL_AI_PROVIDER`/`REFERENCE_IMAGE_PROVIDER` | Python | Must not be `mock` in prod | Public | Provider selectors, independent per route |
-| `GEMINI_API_KEY`/`GLM_API_KEY`/`CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN` | Python | Required when their provider is selected | Secret | Real provider credentials |
-| `INTERNAL_API_TOKEN` | Python | Yes | Secret | Must match Go's `AI_INTERNAL_TOKEN` |
+#### `api` (Go, `backend/`)
 
-Critical boundary: Web never holds a Mongo password, R2 secret, AI provider secret, HF
-secret, or Resend secret. Python never receives Mongo credentials — it has no direct
-Mongo access in this architecture.
+| Variable | Required in prod? | Secret? | Purpose |
+|---|---|---|---|
+| `APP_ENV` | Yes — `production` | Public | Gates every fail-fast production check below |
+| `MONGO_URI` | Yes (must not be localhost/127.0.0.1) | Secret | Atlas connection string |
+| `MONGO_DATABASE` | Yes | Public | Database name |
+| `OBJECT_STORE_PROVIDER` | Yes, must be `r2` | Public | Selects R2 vs local filesystem |
+| `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/`R2_BUCKET`/`R2_ENDPOINT` | Yes (together) when `OBJECT_STORE_PROVIDER=r2` | Secret | R2 object storage credentials |
+| `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` | Yes | Secret | Session signing |
+| `APP_ALLOWED_ORIGINS` | Yes (https only) | Public | CORS/cookie origin allowlist — must include `web`'s exact deployed origin |
+| `AUTH_REFRESH_COOKIE_SECURE` / `AUTH_REFRESH_COOKIE_SAME_SITE` | `true` / `none` for cross-site prod (the normal case: `web` and `api` on different Vercel domains) | Public | Refresh cookie Secure and SameSite flags — see "Cross-origin cookies" above; getting this wrong silently breaks login/Supplier Access with no visible error |
+| `EXTERNAL_API_BASE_URL` | Yes, must be the canonical public **web** app URL (fatal if it contains localhost/127.0.0.1) | Public | Browser-facing origin baked into emailed Supplier/Client portal links |
+| `EMAIL_PROVIDER` | Should be `resend` in prod | Public | smtp vs resend transport |
+| `EMAIL_DELIVERY_MODE` | Must be `direct` in prod (fatal if `test_sink`) | Public | direct vs test-sink routing |
+| `EMAIL_TEST_SINK_ADDRESS` | Tester-only | Public (an inbox address) | test_sink transport recipient |
+| `RESEND_API_KEY`/`RESEND_FROM` | Yes when `EMAIL_PROVIDER=resend` | Secret (key) | Resend credentials |
+| `INVITATION_SECRET_ACTIVE_VERSION`/`INVITATION_SECRET_KEY_V*` | Yes | Secret (key) | Supplier Invitation link HMAC signing — see rotation notes in `.env.example` |
+| `SUPPLIER_VERIFICATION_CODE_ACTIVE_VERSION`/`SUPPLIER_VERIFICATION_CODE_KEY_V*` | Yes, if the Supplier RFQ/OTP flow is used | Secret (key) | Signs Supplier email-OTP verification codes |
+| `SUPPLIER_SESSION_TOKEN_ACTIVE_VERSION`/`SUPPLIER_SESSION_TOKEN_KEY_V*` | Yes, if the Supplier RFQ/OTP flow is used | Secret (key) | Signs the Supplier session cookie AND derives the CSRF double-submit token from it (same keyring, two HMAC domains — see `supplieraccess` module) |
+| `SUPPLIER_RATE_LIMIT_FINGERPRINT_KEY` | Yes, if the Supplier RFQ/OTP flow is used | Secret | Rate-limit fingerprinting for Supplier verification requests |
+| `TRUSTED_PROXY_CIDRS` | Optional (empty trusts the direct peer) | Public | Set only if correct per-client rate-limit scoping behind a proxy/LB matters to you |
+| `VISUAL_ASSET_CAPABILITY_*` / `ASSET_GENERATION_SOURCE_CAPABILITY_*` | **Not applicable in production** | Secret (key) | Only consulted when `OBJECT_STORE_PROVIDER=local`; production always uses `r2` instead, so leave these unset in production |
+| `AI_SERVICE_URL`/`AI_INTERNAL_TOKEN` | Optional (required together if AI Project Setup is enabled) | Secret (token) | Go→Python base URL + shared bearer token; `AI_INTERNAL_TOKEN` must equal `ai-service`'s `INTERNAL_API_TOKEN` |
+| `HUGGINGFACE_SPACE_URL`/`HUGGINGFACE_TOKEN` | Optional (together; required if 3D asset generation is enabled) | Secret (token) | Go→Hunyuan Gradio Space |
+| `HUNYUAN_PROVIDER_TIMEOUT` | Optional (defaults 110s) | Public | Hunyuan call timeout |
+| `SPATIAL_WORKER_TOKEN` | Optional (enables internal worker routes; must match `web`) | Secret | Protects internal process-one routes |
+| `SPATIAL_QUEUE_ENQUEUE_URL`/`SPATIAL_QUEUE_ENQUEUE_TOKEN` | Optional together (required for Vercel Queue wake; must match `web`) | Secret (token) | Go↔Web Queue bridge |
+| `SERVERLESS_MODE` | Recommended `true` | Public | Disables the in-process background ticker |
+
+#### `web` (Next.js, `apps/web/`)
+
+| Variable | Required in prod? | Secret? | Purpose |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Yes | Public | Browser→Go API base URL — no Next.js proxy layer exists |
+| `SPATIAL_API_INTERNAL_URL` | Optional | Public | Web-server→Go internal URL (may differ from the public URL under private networking) |
+| `SPATIAL_WORKER_TOKEN` | Optional (server-side only — never `NEXT_PUBLIC_`) | Secret | Must equal `api`'s value |
+| `SPATIAL_QUEUE_ENQUEUE_TOKEN` | Optional (server-side only — never `NEXT_PUBLIC_`) | Secret | Must equal `api`'s value |
+
+#### `ai-service` (Python, `ai-service/`)
+
+| Variable | Required in prod? | Secret? | Purpose |
+|---|---|---|---|
+| `ENVIRONMENT` | Should be `production` in prod | Public | Enables the fail-fast provider guard below |
+| `AI_PROVIDER`/`SPATIAL_AI_PROVIDER`/`REFERENCE_IMAGE_PROVIDER` | Must not be `mock` in prod | Public | Three independent provider selectors, one per route family |
+| `INTERNAL_API_TOKEN` | Yes | Secret | Must match `api`'s `AI_INTERNAL_TOKEN` |
+| `GEMINI_API_KEY`/`GEMINI_MODEL` | Required when `AI_PROVIDER=gemini` | Secret (key) | Never sent to Go |
+| `GLM_API_KEY`/`GLM_MODEL`/`GLM_BASE_URL`/`GLM_TIMEOUT_SECONDS`/`GLM_MAX_OUTPUT_TOKENS`/`GLM_REASONING_EFFORT` | Required when `SPATIAL_AI_PROVIDER=glm` | Secret (key) | Never sent to Go |
+| `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_FLUX_MODEL` | Required together when `REFERENCE_IMAGE_PROVIDER=cloudflare` | Secret (token) | Never sent to Go |
+| `AI_PROVIDER_MAX_RETRIES`/`REFERENCE_IMAGE_TIMEOUT_SECONDS`/`REFERENCE_IMAGE_MAX_BYTES` | Optional | Public | Tuning knobs |
 
 ---
 
