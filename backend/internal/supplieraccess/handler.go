@@ -96,13 +96,31 @@ type verificationChallengeOutput struct {
 	Body           *verificationChallengeBody
 }
 
+// verifiedBody carries the CSRF token in the JSON response IN ADDITION TO
+// the supplier_csrf cookie (never instead of it — the cookie is still set
+// and matchingCSRFPair still requires both).
+//
+// This exists because Renovex's tester/production topology serves Web and
+// the Go API from two different Vercel domains: a cookie set by the API
+// origin is correctly attached by the browser to subsequent same-target
+// requests, but is invisible to document.cookie running on the Web origin's
+// page — that is a hard, unconditional same-origin rule with no SameSite/
+// Secure/Domain workaround. The frontend must capture this value from the
+// response body once, at verification time, and hold it in memory for the
+// life of the page rather than re-reading it from document.cookie before
+// every mutation.
+type verifiedBody struct {
+	Status    string `json:"status"`
+	CSRFToken string `json:"csrfToken"`
+}
+
 type verifiedOutput struct {
 	Status         int
 	SetCookie      []http.Cookie `header:"Set-Cookie"`
 	CacheControl   string        `header:"Cache-Control"`
 	Pragma         string        `header:"Pragma"`
 	ReferrerPolicy string        `header:"Referrer-Policy"`
-	Body           map[string]string
+	Body           verifiedBody
 }
 
 type logoutSupplierSessionOutput struct {
@@ -113,13 +131,25 @@ type logoutSupplierSessionOutput struct {
 	ReferrerPolicy string        `header:"Referrer-Policy"`
 }
 
+// bootstrapSupplierSessionBody restores the frontend's in-memory CSRF token
+// after a full page reload (module-level JS state does not survive one).
+// CSRFToken here is the SAME derived value already carried by the
+// supplier_csrf cookie — re-derived from the caller's own authenticated
+// session, never a new or independently issued credential. The session
+// secret itself (the raw supplier_session cookie value) is never placed in
+// a response body, only ever in HttpOnly Set-Cookie headers.
+type bootstrapSupplierSessionBody struct {
+	InvitationID string `json:"invitationId"`
+	CSRFToken    string `json:"csrfToken"`
+}
+
 type bootstrapSupplierSessionOutput struct {
 	Status         int
 	SetCookie      http.Cookie `header:"Set-Cookie"`
 	CacheControl   string      `header:"Cache-Control"`
 	Pragma         string      `header:"Pragma"`
 	ReferrerPolicy string      `header:"Referrer-Policy"`
-	Body           map[string]string
+	Body           bootstrapSupplierSessionBody
 }
 
 // RegisterHandlers mounts Phase D's public Supplier security routes. Challenge
@@ -321,9 +351,10 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool, sameSi
 			CacheControl:   supplierNoStore,
 			Pragma:         "no-cache",
 			ReferrerPolicy: "no-referrer",
-			// A map keeps Huma's schema-link transformer from injecting a
-			// framework $schema field into Revision 14's exact one-field body.
-			Body: map[string]string{"status": "verified"},
+			Body: verifiedBody{
+				Status:    "verified",
+				CSRFToken: result.CSRFToken,
+			},
 		}, nil
 	})
 
@@ -355,8 +386,9 @@ func RegisterHandlers(api huma.API, service *Service, secureCookies bool, sameSi
 			CacheControl:   supplierNoStore,
 			Pragma:         "no-cache",
 			ReferrerPolicy: "no-referrer",
-			Body: map[string]string{
-				"invitationId": authorized.InvitationID,
+			Body: bootstrapSupplierSessionBody{
+				InvitationID: authorized.InvitationID,
+				CSRFToken:    authorized.CSRFToken,
 			},
 		}, nil
 	})
