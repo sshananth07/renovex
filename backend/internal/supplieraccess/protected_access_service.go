@@ -29,6 +29,14 @@ type BootstrapSupplierSessionInput struct {
 
 // AuthorizedInvitationAccess is the narrow identity Phase E and later
 // Supplier routes may trust after all session, binding and invitation checks.
+//
+// CSRFToken is populated ONLY by BootstrapSupplierSession (the
+// /supplier-access/session bootstrap the frontend calls after a page
+// reload) — every other caller (ordinary reads and CSRF-protected
+// mutations, via authorizeInvitationAccess) leaves it as the zero value,
+// since they have no reason to hand a fresh consumer of this struct a
+// second copy of a value already re-derivable, and widening it there would
+// exceed what this specific gap requires.
 type AuthorizedInvitationAccess struct {
 	SessionID                 string
 	CompanyID                 string
@@ -38,6 +46,7 @@ type AuthorizedInvitationAccess struct {
 	AccessGeneration          int64
 	CurrentIssuedRFQVersionID string
 	SessionCookieRenewal      SupplierSessionCookieRenewal
+	CSRFToken                 string
 }
 
 // SupplierSessionCookieRenewal carries the unchanged browser credential and
@@ -137,6 +146,17 @@ func (s *Service) BootstrapSupplierSession(ctx context.Context,
 	if err != nil {
 		return AuthorizedInvitationAccess{}, err
 	}
+	// Re-derives the SAME value VerifyChallenge originally computed and set
+	// in the supplier_csrf cookie: DeriveCSRFToken is a pure function of the
+	// session's own identity and credential generation (never changed by
+	// renewSupplierSession above), so no new secret material or storage is
+	// introduced here — this recovers the frontend's lost in-memory copy
+	// after a page reload, it does not mint a second CSRF mechanism.
+	csrfToken, err := s.sessionKeys.DeriveCSRFToken(
+		session.TokenKeyVersion, supplierSessionTokenContext(session))
+	if err != nil {
+		return AuthorizedInvitationAccess{}, err
+	}
 	return AuthorizedInvitationAccess{
 		SessionID: session.ID, CompanyID: session.CompanyID,
 		SupplierID:                session.SupplierID,
@@ -147,6 +167,7 @@ func (s *Service) BootstrapSupplierSession(ctx context.Context,
 		SessionCookieRenewal: SupplierSessionCookieRenewal{
 			Token: input.SessionToken, ExpiresAt: session.SlidingExpiresAt,
 		},
+		CSRFToken: csrfToken,
 	}, nil
 }
 
