@@ -1042,6 +1042,31 @@
         ],
         "type": "object"
       },
+      "BootstrapSupplierSessionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/BootstrapSupplierSessionBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "csrfToken": {
+            "type": "string"
+          },
+          "invitationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitationId",
+          "csrfToken"
+        ],
+        "type": "object"
+      },
       "CancelDesignGenerationAttemptInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -10063,6 +10088,31 @@
           "challengeId",
           "expiresAt",
           "deliveryStatus"
+        ],
+        "type": "object"
+      },
+      "VerifiedBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/VerifiedBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "csrfToken": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "csrfToken"
         ],
         "type": "object"
       },
@@ -19501,10 +19551,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/VerifiedBody"
                 }
               }
             },
@@ -21468,10 +21515,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/BootstrapSupplierSessionBody"
                 }
               }
             },
