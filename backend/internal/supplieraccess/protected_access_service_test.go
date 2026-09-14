@@ -595,6 +595,100 @@ func TestProtectedInvitationMutationRequiresServerDerivedCSRFBeforeRenewal(
 	}
 }
 
+// TestPageRefreshLifecycleRecoversCSRFTokenViaSessionBootstrap covers the
+// gap the previous cross-origin CSRF fix intentionally left open: a full
+// browser refresh keeps the supplier_session and supplier_csrf cookies but
+// destroys the frontend's module-level in-memory CSRF token. This proves
+// BootstrapSupplierSession (the service behind GET /supplier-access/session)
+// hands back the SAME token a protected mutation needs, letting the
+// frontend recover without ever touching document.cookie — and that the
+// existing CSRF gate (matchingCSRFPair, unmodified) still rejects an empty
+// or mismatched header at every step of that lifecycle.
+func TestPageRefreshLifecycleRecoversCSRFTokenViaSessionBootstrap(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	rig := newVerificationServiceRig(t, now)
+	verified := verifySupplierSession(t, rig, now)
+
+	// A protected mutation succeeds using the token captured at verification
+	// — this is the ALREADY-FIXED cross-origin path, unchanged here.
+	firstMutationAt := now.Add(time.Minute)
+	if _, err := rig.service.AuthorizeInvitationMutation(
+		context.Background(), supplieraccess.AuthorizeInvitationMutationInput{
+			AuthorizeInvitationAccessInput: supplieraccess.AuthorizeInvitationAccessInput{
+				SessionToken: verified.SessionToken,
+				InvitationID: rig.exchange.InvitationID,
+				AccessedAt:   firstMutationAt,
+			},
+			CSRFCookie: verified.CSRFToken,
+			CSRFHeader: verified.CSRFToken,
+		}); err != nil {
+		t.Fatalf("first protected mutation (pre-refresh): %v", err)
+	}
+
+	// Simulate a full page reload: the browser still holds both cookies,
+	// but from this point on the test deliberately never reads
+	// verified.CSRFToken again except to check the RECOVERED value equals
+	// it — exactly like lost JS module state, where the frontend has
+	// nothing left but the cookies.
+	bootstrapAt := now.Add(2 * time.Minute)
+	authorized, err := rig.service.BootstrapSupplierSession(
+		context.Background(), supplieraccess.BootstrapSupplierSessionInput{
+			SessionToken: verified.SessionToken,
+			AccessedAt:   bootstrapAt,
+		})
+	if err != nil {
+		t.Fatalf("session bootstrap after simulated refresh: %v", err)
+	}
+	recoveredCSRFToken := authorized.CSRFToken
+	if recoveredCSRFToken == "" || recoveredCSRFToken != verified.CSRFToken {
+		t.Fatalf("recovered CSRF token = %q, want it to equal the original %q",
+			recoveredCSRFToken, verified.CSRFToken)
+	}
+
+	// The negative cases still hold with the post-refresh session state: an
+	// empty or mismatched header is still rejected, proving the recovery
+	// path adds a delivery channel without weakening matchingCSRFPair.
+	secondMutationAt := now.Add(3 * time.Minute)
+	if _, err := rig.service.AuthorizeInvitationMutation(
+		context.Background(), supplieraccess.AuthorizeInvitationMutationInput{
+			AuthorizeInvitationAccessInput: supplieraccess.AuthorizeInvitationAccessInput{
+				SessionToken: verified.SessionToken,
+				InvitationID: rig.exchange.InvitationID,
+				AccessedAt:   secondMutationAt,
+			},
+			CSRFCookie: verified.CSRFToken,
+			CSRFHeader: "",
+		}); !errors.Is(err, supplieraccess.ErrSupplierCSRFRejected) {
+		t.Fatalf("empty-header post-refresh mutation error = %v", err)
+	}
+	if _, err := rig.service.AuthorizeInvitationMutation(
+		context.Background(), supplieraccess.AuthorizeInvitationMutationInput{
+			AuthorizeInvitationAccessInput: supplieraccess.AuthorizeInvitationAccessInput{
+				SessionToken: verified.SessionToken,
+				InvitationID: rig.exchange.InvitationID,
+				AccessedAt:   secondMutationAt,
+			},
+			CSRFCookie: verified.CSRFToken,
+			CSRFHeader: opaqueToken(233),
+		}); !errors.Is(err, supplieraccess.ErrSupplierCSRFRejected) {
+		t.Fatalf("mismatched-header post-refresh mutation error = %v", err)
+	}
+
+	// The recovered token authorizes a real protected mutation again.
+	if _, err := rig.service.AuthorizeInvitationMutation(
+		context.Background(), supplieraccess.AuthorizeInvitationMutationInput{
+			AuthorizeInvitationAccessInput: supplieraccess.AuthorizeInvitationAccessInput{
+				SessionToken: verified.SessionToken,
+				InvitationID: rig.exchange.InvitationID,
+				AccessedAt:   secondMutationAt,
+			},
+			CSRFCookie: verified.CSRFToken,
+			CSRFHeader: recoveredCSRFToken,
+		}); err != nil {
+		t.Fatalf("second protected mutation using recovered token: %v", err)
+	}
+}
+
 func TestMalformedSessionCredentialDoesNotReachMongo(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	rig := newVerificationServiceRig(t, now)
