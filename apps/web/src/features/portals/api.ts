@@ -71,13 +71,22 @@ export async function decideClientQuotation(
   return data;
 }
 
+// supplierCSRFToken is held in module memory for the life of the page,
+// never in document.cookie. Renovex's Web and API run on two different
+// Vercel origins, so a cookie the API sets (supplier_csrf) is correctly
+// attached by the browser to requests TO the API, but is invisible to
+// document.cookie running on Web's own page — a hard, unconditional
+// same-origin rule, not a SameSite/Secure/Domain gap. The verify-challenge
+// response therefore also returns the token in its JSON body once, at
+// verification time; setSupplierCSRFToken captures it there.
+let supplierCSRFToken = "";
+
+function setSupplierCSRFToken(token: string) {
+  supplierCSRFToken = token;
+}
+
 function csrfToken() {
-  return document.cookie
-    .split("; ")
-    .find((part) => part.startsWith("supplier_csrf="))
-    ?.split("=")
-    .slice(1)
-    .join("=") ?? "";
+  return supplierCSRFToken;
 }
 
 export async function openSupplierAccess(token: string) {
@@ -101,6 +110,7 @@ export async function verifySupplierChallenge(challengeId: string, code: string)
     body: { challengeId, code, operationId: crypto.randomUUID() },
   });
   if (error) throw error;
+  if (data?.csrfToken) setSupplierCSRFToken(data.csrfToken);
   return data;
 }
 
@@ -117,6 +127,12 @@ export async function getSupplierSession() {
   if (error) throw error;
   const invitationId = data?.invitationId;
   if (!invitationId) throw new Error("Supplier session has no invitation");
+  // Rehydrates the in-memory CSRF token after a full page reload, when the
+  // module-level state verifySupplierChallenge originally set is gone but
+  // the supplier_session/supplier_csrf cookies are not. The backend
+  // re-derives the SAME token from the caller's authenticated session, so
+  // this is a recovery of lost frontend state, not a new credential.
+  if (data?.csrfToken) setSupplierCSRFToken(data.csrfToken);
   return { invitationId };
 }
 
