@@ -551,7 +551,15 @@ func TestOpenHandlerUsesOneNeutralCredentialFailureAndBounded503(t *testing.T) {
 	}
 }
 
-func TestVerifyHandlerReturnsOnlyStatusAfterSettingBoundSessionCookies(t *testing.T) {
+// TestVerifyHandlerReturnsStatusAndCSRFTokenAfterSettingBoundSessionCookies
+// proves the response body carries the CSRF token IN ADDITION TO the
+// supplier_csrf cookie (never instead of it), and that the returned value is
+// exactly the token the cookie also carries. This is what lets a frontend
+// running on a different origin than the API (Renovex's actual tester/
+// production topology) obtain the CSRF token without depending on
+// document.cookie, which cannot read a cookie scoped to a different origin —
+// a hard browser rule, not a SameSite/Secure/Domain misconfiguration.
+func TestVerifyHandlerReturnsStatusAndCSRFTokenAfterSettingBoundSessionCookies(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	rig := newVerificationServiceRig(t, now)
 	challengeID, code := rig.createChallenge(t, now)
@@ -581,7 +589,10 @@ func TestVerifyHandlerReturnsOnlyStatusAfterSettingBoundSessionCookies(t *testin
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decoding verification response: %v", err)
 	}
-	if len(body) != 1 || body["status"] != "verified" {
+	// Huma's schema-link transformer additionally injects a $schema field for
+	// a named struct body (unlike the old bare map) — harmless and expected,
+	// so this checks the fields that matter rather than an exact count.
+	if body["status"] != "verified" || body["csrfToken"] == "" {
 		t.Fatalf("verification body = %#v", body)
 	}
 
@@ -600,6 +611,14 @@ func TestVerifyHandlerReturnsOnlyStatusAfterSettingBoundSessionCookies(t *testin
 	}
 	if sessionCookie == nil || csrfCookie == nil {
 		t.Fatalf("verification cookies = %#v", cookies)
+	}
+	// The cookie is still set exactly as before — the body field is
+	// additive, never a replacement for it. The two must carry the SAME
+	// token, since matchingCSRFPair requires the cookie and the frontend-
+	// echoed header to be equal.
+	if body["csrfToken"] != csrfCookie.Value {
+		t.Fatalf("body csrfToken = %v, want it to equal the supplier_csrf cookie value %q",
+			body["csrfToken"], csrfCookie.Value)
 	}
 	for name, cookie := range map[string]*http.Cookie{
 		"session": sessionCookie,
@@ -632,7 +651,104 @@ func TestVerifyHandlerReturnsOnlyStatusAfterSettingBoundSessionCookies(t *testin
 	}
 }
 
-func TestSupplierSessionBootstrapReturnsOnlyItsBoundInvitation(t *testing.T) {
+// TestCrossOriginFrontendCanAuthorizeAMutationUsingOnlyTheVerifyResponseBody
+// proves the actual fix end-to-end through the real HTTP boundary: a caller
+// that behaves exactly like Renovex's Web frontend — reading the CSRF token
+// ONLY from the verify-challenge JSON response body, never from
+// document.cookie/the Cookie jar directly — can still successfully perform a
+// CSRF-protected mutation (logout), because the cookie is still set and the
+// two values still match. It also proves the opposite: an empty or
+// mismatched header on that same mutation still 403s, so the fix adds a
+// delivery channel for the token without weakening matchingCSRFPair.
+func TestCrossOriginFrontendCanAuthorizeAMutationUsingOnlyTheVerifyResponseBody(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	rig := newVerificationServiceRig(t, now)
+	challengeID, code := rig.createChallenge(t, now)
+	router, api := platformhttp.NewRouter("supplier-access-test", "0.0.0")
+	supplieraccess.RegisterHandlers(api, rig.service, false, http.SameSiteLaxMode)
+
+	verifyRequestBody, _ := json.Marshal(map[string]string{
+		"challengeId": challengeID,
+		"code":        code,
+		"operationId": "verify-operation-cross-origin",
+	})
+	verifyRequest := httptest.NewRequest(http.MethodPost,
+		"/supplier-access/challenges/verify", bytes.NewReader(verifyRequestBody))
+	verifyRequest.Header.Set("Content-Type", "application/json")
+	verifyResponse := httptest.NewRecorder()
+	router.ServeHTTP(verifyResponse, verifyRequest)
+	if verifyResponse.Code != http.StatusOK {
+		t.Fatalf("verify status = %d: %s", verifyResponse.Code, verifyResponse.Body.String())
+	}
+
+	// This is the ONLY place the test learns the CSRF token — from the JSON
+	// body, exactly as a cross-origin frontend must, never by reaching into
+	// the Set-Cookie header or an internal test helper's return value.
+	var verifyBody struct {
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(verifyResponse.Body.Bytes(), &verifyBody); err != nil {
+		t.Fatalf("decoding verify response: %v", err)
+	}
+	if verifyBody.CSRFToken == "" {
+		t.Fatal("verify response body carried no csrfToken")
+	}
+
+	var sessionCookie, csrfCookie *http.Cookie
+	for _, cookie := range verifyResponse.Result().Cookies() {
+		switch cookie.Name {
+		case supplieraccess.SupplierSessionCookieName:
+			sessionCookie = cookie
+		case supplieraccess.SupplierCSRFCookieName:
+			csrfCookie = cookie
+		}
+	}
+	if sessionCookie == nil || csrfCookie == nil {
+		t.Fatalf("verify cookies = %#v", verifyResponse.Result().Cookies())
+	}
+
+	doLogout := func(header string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost,
+			"/supplier-access/session/logout", nil)
+		// The browser attaches both cookies regardless of which origin's JS
+		// is running — this reflects what curl/DevTools showed in
+		// production: the Cookie header always carried both values
+		// correctly, even when the frontend's own document.cookie read
+		// failed.
+		request.AddCookie(&http.Cookie{Name: supplieraccess.SupplierSessionCookieName, Value: sessionCookie.Value})
+		request.AddCookie(&http.Cookie{Name: supplieraccess.SupplierCSRFCookieName, Value: csrfCookie.Value})
+		if header != "" {
+			request.Header.Set("X-CSRF-Token", header)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+
+	// An empty header (the exact production symptom) still 403s.
+	if response := doLogout(""); response.Code != http.StatusForbidden {
+		t.Fatalf("empty-header status = %d: %s", response.Code, response.Body.String())
+	}
+	// A mismatched header still 403s.
+	if response := doLogout(opaqueToken(231)); response.Code != http.StatusForbidden {
+		t.Fatalf("mismatched-header status = %d: %s", response.Code, response.Body.String())
+	}
+	// The token captured from the JSON body successfully authorizes the
+	// mutation.
+	if response := doLogout(verifyBody.CSRFToken); response.Code != http.StatusNoContent {
+		t.Fatalf("matching-header (from body) status = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+// TestSupplierSessionBootstrapReturnsInvitationAndRehydratesCSRFToken proves
+// the page-refresh CSRF gap is closed: a page reload retains only the
+// supplier_session and supplier_csrf cookies (module-level JS state is
+// gone), so a fresh call to GET /supplier-access/session must hand the
+// frontend back the exact same CSRF token it originally received from
+// verification, letting it repopulate its in-memory state without ever
+// reading document.cookie. The response must also never carry the session
+// secret itself (only ever placed in an HttpOnly Set-Cookie header).
+func TestSupplierSessionBootstrapReturnsInvitationAndRehydratesCSRFToken(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	rig := newVerificationServiceRig(t, now)
 	verified := verifySupplierSession(t, rig, now)
@@ -655,8 +771,21 @@ func TestSupplierSessionBootstrapReturnsOnlyItsBoundInvitation(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decoding session bootstrap: %v", err)
 	}
-	if len(body) != 1 || body["invitationId"] != rig.exchange.InvitationID {
+	if body["invitationId"] != rig.exchange.InvitationID {
 		t.Fatalf("bootstrap body = %#v", body)
+	}
+	// The recovered token must be exactly the one already carried by the
+	// supplier_csrf cookie set at verification time — this is a
+	// RE-DERIVATION of the same value, not a new credential.
+	if body["csrfToken"] != verified.CSRFToken {
+		t.Fatalf("bootstrap csrfToken = %v, want it to equal the original verification CSRFToken %q",
+			body["csrfToken"], verified.CSRFToken)
+	}
+	// The raw session credential must never appear in a response body.
+	for key, value := range body {
+		if str, ok := value.(string); ok && str == verified.SessionToken {
+			t.Fatalf("bootstrap body leaked the session secret under key %q", key)
+		}
 	}
 	if response.Header().Get("Cache-Control") != "no-store, max-age=0" ||
 		response.Header().Get("Pragma") != "no-cache" ||
@@ -668,6 +797,14 @@ func TestSupplierSessionBootstrapReturnsOnlyItsBoundInvitation(t *testing.T) {
 		cookies[0].Name != supplieraccess.SupplierSessionCookieName ||
 		cookies[0].Value != verified.SessionToken || !cookies[0].HttpOnly {
 		t.Fatalf("renewed session cookie = %#v", cookies)
+	}
+	// The bootstrap route sets no CSRF cookie of its own — the existing
+	// supplier_csrf cookie from verification is untouched and still the
+	// authoritative half of matchingCSRFPair.
+	for _, cookie := range cookies {
+		if cookie.Name == supplieraccess.SupplierCSRFCookieName {
+			t.Fatalf("bootstrap unexpectedly (re)issued a CSRF cookie: %#v", cookie)
+		}
 	}
 }
 
@@ -797,11 +934,17 @@ func TestVerifyHandlerRecoveryReturnsTheSameBodyAndCredentials(t *testing.T) {
 	first := send()
 	recovered := send()
 	if first.Code != http.StatusOK || recovered.Code != http.StatusOK ||
-		first.Body.String() != recovered.Body.String() ||
-		first.Body.String() != "{\"status\":\"verified\"}\n" {
+		first.Body.String() != recovered.Body.String() {
 		t.Fatalf("first/recovered responses = %d %q / %d %q",
 			first.Code, first.Body.String(), recovered.Code,
 			recovered.Body.String())
+	}
+	var decodedBody map[string]any
+	if err := json.Unmarshal(first.Body.Bytes(), &decodedBody); err != nil {
+		t.Fatalf("decoding verification response: %v", err)
+	}
+	if decodedBody["status"] != "verified" || decodedBody["csrfToken"] == "" {
+		t.Fatalf("verification body = %#v", decodedBody)
 	}
 
 	values := func(response *httptest.ResponseRecorder) map[string]string {
