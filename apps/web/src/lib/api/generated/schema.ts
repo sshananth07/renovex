@@ -3668,6 +3668,16 @@ export interface components {
             status: string;
             type: string;
         };
+        BootstrapSupplierSessionBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/BootstrapSupplierSessionBody.json
+             */
+            readonly $schema?: string;
+            csrfToken: string;
+            invitationId: string;
+        };
         CancelDesignGenerationAttemptInputBody: {
             /**
              * Format: uri
@@ -6733,6 +6743,16 @@ export interface components {
             deliveryStatus: string;
             /** Format: date-time */
             expiresAt: string;
+        };
+        VerifiedBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/VerifiedBody.json
+             */
+            readonly $schema?: string;
+            csrfToken: string;
+            status: string;
         };
         VerifyChallengeInputBody: {
             /**
@@ -12774,9 +12794,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["VerifiedBody"];
                 };
             };
             /** @description Error */
@@ -13710,9 +13728,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["BootstrapSupplierSessionBody"];
                 };
             };
             /** @description Error */
